@@ -1,0 +1,18 @@
+{
+  "ollama": {
+    "url": "http://localhost:11434",
+    "model": "llama2"
+  },
+  "gemini": {
+    "api_key": "AIzaSyD_gPLOPzoRpUtc6Ab3jYR5lVPurcCrJF8",
+    "model": "gemini-flash"
+  },
+  "groq": {
+    "api_key": "",
+    "model": "llama3-8b-8192"
+  },
+  "mistral": {
+    "api_key": "",
+    "model": "mistral-large-latest"
+  }
+}

@@ -164,7 +164,7 @@ class SoundAlertSystem:
             self.emergency_active = True
             self.emergency_thread = threading.Thread(target=self.emergency_siren, daemon=True)
             self.emergency_thread.start()
-            print(f"{Fore.RED}🚨 EMERGENCY SIREN ACTIVATED{Style.RESET_ALL}")
+            print(f"{Fore.RED}🚨 АВАРІЙНА СИРЕНА АКТИВОВАНА{Style.RESET_ALL}")
     
     def stop_emergency_siren(self):
         """Зупинити аварійну сирену"""
@@ -172,7 +172,7 @@ class SoundAlertSystem:
             self.emergency_active = False
             if self.emergency_thread:
                 self.emergency_thread.join(timeout=1)
-            print(f"{Fore.YELLOW}🔇 Emergency siren stopped{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}🔇 Аварійна сирена зупинена{Style.RESET_ALL}")
     
     def can_play_alert(self, alert_type, threat_level):
         """Перевірити чи можна відтворити сповіщення (обмеження частоти)"""
@@ -190,43 +190,40 @@ class SoundAlertSystem:
         self.last_alert_time[key] = current_time
         return True
     
-    def trigger_alert(self, alert_type, threat_level, message="Security Alert", details=""):
+    def trigger_alert(self, alert_type, threat_level, message="Сповіщення", details=""):
         """Запустити звукове сповіщення"""
         if not self.can_play_alert(alert_type, threat_level):
             return
         
-        print(f"{Fore.YELLOW}🔊 Sound Alert: {alert_type.value} - {threat_level.name}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}🔊 Звукове сповіщення: {alert_type.value} - {threat_level.name}{Style.RESET_ALL}")
         
         # Для найвищого рівня загрози - запустити сирену
         if threat_level == ThreatLevel.EMERGENCY:
             self.start_emergency_siren()
             return
         
-        # Звуковий сигнал у окремому потоці
         def play_alert():
             try:
-                # 1. Системний звук
+                # Системний звук
                 sound_name = self.system_sounds[threat_level]
                 self.play_system_sound(sound_name)
-                
                 time.sleep(0.3)
                 
-                # 2. Послідовність beep-ів
+                # Послідовність beep сигналів
                 self.generate_beep_sequence(threat_level)
-                
                 time.sleep(0.5)
                 
-                # 3. Голосове сповіщення для HIGH, CRITICAL
+                # Голосове сповіщення для високих рівнів загрози
                 if threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]:
                     alert_messages = {
-                        AlertType.NETWORK_INTRUSION: "Network intrusion detected",
-                        AlertType.SUSPICIOUS_PROCESS: "Suspicious process detected", 
-                        AlertType.GPU_MINING: "Possible mining activity detected",
-                        AlertType.LOCKDOWN_BREACH: "Lockdown system breach",
-                        AlertType.SYSTEM_ERROR: "Critical system error",
-                        AlertType.PERIPHERAL_DETECTED: "Unauthorized peripheral detected",
-                        AlertType.SSH_CONNECTION: "Suspicious SSH connection",
-                        AlertType.PORT_SCAN: "Port scanning detected"
+                        AlertType.NETWORK_INTRUSION: "Виявлено вторгнення в мережу",
+                        AlertType.SUSPICIOUS_PROCESS: "Виявлено підозрілий процес", 
+                        AlertType.GPU_MINING: "Виявлено можливу активність майнінгу",
+                        AlertType.LOCKDOWN_BREACH: "Порушення системи блокування",
+                        AlertType.SYSTEM_ERROR: "Критична помилка системи",
+                        AlertType.PERIPHERAL_DETECTED: "Виявлено неавторизований периферійний пристрій",
+                        AlertType.SSH_CONNECTION: "Підозріле SSH з'єднання",
+                        AlertType.PORT_SCAN: "Виявлено сканування портів"
                     }
                     
                     voice_message = alert_messages.get(alert_type, message)
@@ -236,7 +233,7 @@ class SoundAlertSystem:
                     self.play_voice_alert(voice_message, threat_level)
                 
             except Exception as e:
-                print(f"{Fore.RED}Sound alert error: {e}{Style.RESET_ALL}")
+                print(f"{Fore.RED}Помилка звукового сповіщення: {e}{Style.RESET_ALL}")
         
         # Запустити в окремому потоці
         alert_thread = threading.Thread(target=play_alert, daemon=True)
@@ -245,41 +242,34 @@ class SoundAlertSystem:
     def enable_sound(self):
         """Увімкнути звук"""
         self.sound_enabled = True
-        print(f"{Fore.GREEN}🔊 Sound alerts enabled{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}🔊 Звукові сповіщення увімкнено{Style.RESET_ALL}")
     
     def disable_sound(self):
         """Вимкнути звук"""
         self.sound_enabled = False
         self.stop_emergency_siren()
-        print(f"{Fore.YELLOW}🔇 Sound alerts disabled{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}🔇 Звукові сповіщення вимкнено{Style.RESET_ALL}")
     
     def test_all_alerts(self):
-        """Тестувати всі типи сповіщень"""
-        print(f"{Fore.CYAN}🎵 Testing all alert levels...{Style.RESET_ALL}")
+        """Тестувати всі рівні сповіщень"""
+        print(f"{Fore.CYAN}🎵 Тестування всіх рівнів сповіщень...{Style.RESET_ALL}")
         
-        test_cases = [
-            (AlertType.SYSTEM_ERROR, ThreatLevel.LOW, "Low level test"),
-            (AlertType.PERIPHERAL_DETECTED, ThreatLevel.MEDIUM, "Medium level test"),
-            (AlertType.SUSPICIOUS_PROCESS, ThreatLevel.HIGH, "High level test"),
-            (AlertType.NETWORK_INTRUSION, ThreatLevel.CRITICAL, "Critical level test"),
-        ]
+        for i, threat_level in enumerate(ThreatLevel, 1):
+            print(f"Тестування {threat_level.name}...")
+            self.trigger_alert(AlertType.SYSTEM_ERROR, threat_level, f"Тест {threat_level.name}")
+            time.sleep(2)
         
-        for alert_type, threat_level, message in test_cases:
-            print(f"Testing {threat_level.name}...")
-            self.trigger_alert(alert_type, threat_level, message)
-            time.sleep(3)  # Пауза між тестами
-        
-        print(f"{Fore.GREEN}✅ Alert testing complete{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}✅ Тестування сповіщень завершено{Style.RESET_ALL}")
 
 
 # Глобальний екземпляр системи сповіщень
 sound_system = SoundAlertSystem()
 
-def play_alert(alert_type, threat_level, message="Alert", details=""):
+def play_alert(alert_type, threat_level, message="Сповіщення", details=""):
     """Зручна функція для запуску сповіщень"""
     sound_system.trigger_alert(alert_type, threat_level, message, details)
 
-def emergency_alert(message="EMERGENCY"):
+def emergency_alert(message="НАДЗВИЧАЙНА СИТУАЦІЯ"):
     """Аварійне сповіщення"""
     sound_system.trigger_alert(AlertType.LOCKDOWN_BREACH, ThreatLevel.EMERGENCY, message)
 
@@ -289,17 +279,17 @@ def test_sounds():
 
 if __name__ == "__main__":
     # Демо системи звуків
-    print("NIMDA Sound Alert System Demo")
+    print("Демо системи звукових сповіщень NIMDA")
     print("=" * 40)
     
     if len(sys.argv) > 1:
         if sys.argv[1] == "test":
             test_sounds()
         elif sys.argv[1] == "emergency":
-            emergency_alert("TEST EMERGENCY")
+            emergency_alert("ТЕСТ НАДЗВИЧАЙНОЇ СИТУАЦІЇ")
             time.sleep(5)
             sound_system.stop_emergency_siren()
     else:
-        print("Usage:")
-        print("  python3 sound_alerts.py test      - Test all alert levels")
-        print("  python3 sound_alerts.py emergency - Test emergency siren")
+        print("Використання:")
+        print("  python3 sound_alerts.py test      - Тестувати всі рівні сповіщень")
+        print("  python3 sound_alerts.py emergency - Тестувати аварійну сирену")

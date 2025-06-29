@@ -1,240 +1,217 @@
-# NIMDA Інтегрована Система Безпеки
+# NIMDA Security System - Comprehensive Monitoring
 
-## 🎯 Опис
+A comprehensive security monitoring system with Tkinter GUI, featuring real-time network monitoring, port scanning, anomaly detection, and AI-powered analysis with Ukrainian/English language support.
 
-NIMDA Integrated Security - це повністю інтегрована система безпеки з інтерактивним управлінням та багатоекранним відображенням в TMUX.
+## 🚀 Features
 
-## ✨ Основні особливості
+### Core Security Monitoring
+- **Real-time Network Monitoring**: Track active connections, detect suspicious traffic
+- **Port Scanning**: Monitor open ports, identify vulnerable services
+- **Anomaly Detection**: Detect system anomalies with detailed analysis
+- **Threat Assessment**: AI-powered threat analysis and recommendations
+- **Security Logging**: Comprehensive event logging and reporting
 
-### 🖥️ Інтерфейс
-- **6 інформаційних панелей** в одному TMUX екрані:
-  - 📡 Network Monitor - моніторинг мережевих з'єднань
-  - ⚙️ Process Monitor - топ процесів за CPU
-  - 🎮 GPU Monitor - моніторинг Apple Silicon GPU
-  - 🛡️ Security Events - події безпеки
-  - 📋 System Logs - системні логи
-  - 💻 System Info - інформація про систему
+### AI-Powered Analysis
+- **Multi-language AI Support**: Ukrainian and English responses
+- **Deep Analysis**: Detailed analysis of ports, addresses, and anomalies
+- **Security Recommendations**: AI-generated security recommendations
+- **Emergency Analysis**: Rapid threat assessment and response
+- **Comprehensive Reports**: AI-generated security reports
 
-- **Маленький окремий пейн** для інтерактивного меню управління
+### Advanced Analysis Features
+- **Deep Port Analysis**: Detailed analysis of individual ports with risk assessment
+- **Deep Address Analysis**: Comprehensive analysis of network addresses
+- **Bulk Analysis**: Quick analysis of all ports and addresses
+- **Anomaly Analysis**: Detailed root cause analysis and mitigation steps
+- **Language Switching**: Toggle between Ukrainian and English interfaces
 
-### 🔒 Lockdown System
-- Блокування WiFi та Bluetooth
-- Захист від зовнішніх підключень
-- Інтеграція з Apple Secure Enclave (через ключ)
+## 🛠️ Installation
 
-### 🎮 Управління
-- **Інтерактивне меню** з команд управління
-- **Комбінації клавіш** для швидкого доступу
-- **Фокусування** на різні панелі моніторингу
+1. **Clone the repository**:
+```bash
+git clone <repository-url>
+cd set
+```
 
-## 🚀 Запуск
+2. **Install dependencies**:
+```bash
+pip3 install -r requirements.txt
+```
+
+3. **Install Ollama** (for AI features):
+```bash
+# macOS
+brew install ollama
+
+# Or download from https://ollama.ai
+```
+
+4. **Start Ollama and download a model**:
+```bash
+ollama serve
+ollama pull llama2
+```
+
+## 🚀 Usage
+
+### Quick Start
+```bash
+# Start the GUI application
+python3 nimda_tkinter.py
+
+# Or use the startup script
+./start_nimda_tkinter.sh
+```
+
+### GUI Interface
+
+#### Dashboard Tab
+- Real-time system metrics (CPU, Memory, Network)
+- Threat level indicators
+- Quick status overview
+
+#### Network Tab
+- Active network connections
+- Remote address analysis
+- Connection blocking capabilities
+- Deep address analysis
+
+#### Ports Tab
+- Open port monitoring
+- Service identification
+- Port risk assessment
+- Deep port analysis
+
+#### Anomalies Tab
+- Real-time anomaly detection
+- Detailed anomaly analysis
+- Root cause analysis
+- Mitigation recommendations
+
+#### AI Analysis Tab
+- **Multi-language AI queries** (Ukrainian/English)
+- Security threat analysis
+- AI recommendations
+- Emergency analysis
+- Language switching button
+
+#### Logs Tab
+- Security event logging
+- Export capabilities
+- Historical analysis
+
+#### Emergency Tab
+- System lockdown
+- Network isolation
+- Process termination
+- Emergency backup
+
+## 🔧 Configuration
+
+### Language Settings
+- Click the "🌐 Language" button in the Anomalies tab to switch UI language
+- Click the "🌐 Switch AI Language" button in the AI Analysis tab to switch AI response language
+- AI will respond in the selected language for all queries
+
+### Security Monitoring
+- Automatic baseline establishment
+- Configurable update intervals
+- Customizable threat thresholds
+
+## 📊 Analysis Features
+
+### Deep Port Analysis
+- Service identification
+- Risk level assessment
+- Security concerns
+- Mitigation recommendations
+- Port scanning results
+
+### Deep Address Analysis
+- Geolocation information
+- Reputation checking
+- Connection details
+- Security assessment
+- Recommendations
+
+### Anomaly Analysis
+- Root cause analysis
+- Impact assessment
+- Mitigation steps
+- Prevention measures
+- Related threats
+- System health status
+
+## 🧪 Testing
+
+Run the test scripts to verify functionality:
 
 ```bash
-./start_nimda.sh
+# Test deep analysis
+python3 test_deep_analysis.py
+
+# Test anomaly analysis
+python3 test_anomaly_analysis.py
+
+# Test AI language functionality
+python3 test_ai_language.py
+
+# Test GUI components
+python3 test_gui.py
 ```
 
-або
+## 🔍 Troubleshooting
 
+### Common Issues
+
+1. **Network scan errors**: Normal on some systems, shows test data
+2. **Ollama connection issues**: Ensure Ollama is running and accessible
+3. **Permission errors**: Run with appropriate permissions for system monitoring
+
+### Debug Mode
 ```bash
-python3 nimda_integrated.py
+# Enable debug logging
+export NIMDA_DEBUG=1
+python3 nimda_tkinter.py
 ```
 
-## 🎮 Керування
+## 📝 Logging
 
-### Команди меню:
-- `L` - Увімкнути lockdown
-- `U` - Вимкнути lockdown
-- `1-6` - Фокус на відповідну панель моніторингу
-- `S` - Сканування системи
-- `C` - Очистити логи
-- `R` - Перезапустити монітори
-- `I` - Показати системну інформацію
-- `Q` - Вийти з NIMDA
+The system provides comprehensive logging:
+- Security events
+- AI interactions
+- System anomalies
+- Network activities
+- Error tracking
 
-### 🔊 Звукові команди:
-- `T` - Тестувати звукові сповіщення
-- `M` - Увімкнути/Вимкнути звук
-- `E` - Тестувати аварійну сирену (5 сек)
-- `A` - Демо різних типів сповіщень
-- `I` - Показати системну інформацію
-- `Q` - Вийти з NIMDA
+## 🤝 Contributing
 
-### Гарячі клавіші:
-- `Ctrl+L` - **Аварійне відключення lockdown**
-- `Ctrl+C` - Аварійний вихід
-- `Ctrl+B + Arrow Keys` - Навігація між панелями TMUX
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
 
-## 📊 Панелі моніторингу
+## 📄 License
 
-### 📡 Network Monitor (Панель 0)
-- Активні мережеві з'єднання
-- Локальні та віддалені адреси
-- Статус з'єднань
-- Кількість активних підключень
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-### ⚙️ Process Monitor (Панель 1)
-- Топ процесів за використанням CPU
-- PID, назва, CPU%, Memory%
-- Кольорове виділення навантаження
+## 🆘 Support
 
-### 🎮 GPU Monitor (Панель 2)
-- Інформація про Apple Silicon GPU
-- Процеси з високим CPU (GPU-like навантаження)
-- Vendor, Model, VRAM
+For support and questions:
+- Check the troubleshooting section
+- Review the logs for error details
+- Test individual components
+- Ensure all dependencies are installed
 
-### 🛡️ Security Events (Панель 3)
-- Підозрілі порти та з'єднання
-- Часові мітки подій
-- Типи загроз безпеки
+## 🔄 Updates
 
-### 📋 System Logs (Панель 4)
-- Системні логи безпеки
-- Логи NIMDA
-- Помилки та попередження
+The system automatically:
+- Updates security baselines
+- Refreshes network data
+- Detects new anomalies
+- Maintains AI context
 
-### 💻 System Info (Панель 5)
-- Використання CPU та пам'яті
-- Інформація про диск
-- Мережевий I/O
-- Час роботи системи
+---
 
-## 🔧 Технічні деталі
-
-### Архітектура
-- **Головний клас**: `NIMDAIntegrated` - координує всю систему
-- **Монітори**: Окремі класи для кожного типу моніторингу
-- **Lockdown**: `LockdownSystem` для блокування периферії
-- **Ключі**: `SecureEnclaveKey` для роботи з ключами
-
-### TMUX Layout
-- 6 основних панелей у форматі 3x2
-- 1 мала панель для меню внизу
-- Автоматичне створення та налаштування
-
-### Безпека
-- Інтеграція з macOS Secure Enclave
-- Блокування WiFi/Bluetooth на рівні системи
-- Моніторинг підозрілих процесів та портів
-
-## 📦 Залежності
-
-```text
-psutil>=5.9.0
-colorama>=0.4.6
-```
-
-## 🔧 Системні вимоги
-
-- macOS (оптимізовано для Mac Studio M1 Max)
-- Python 3.8+
-- tmux
-- sudo права (для lockdown функцій)
-
-## 📁 Структура файлів
-
-```
-NIMDA/set/
-├── nimda_integrated.py    # Головний інтегрований файл
-├── start_nimda.sh         # Скрипт запуску
-├── requirements.txt       # Python залежності
-└── README.md             # Цей файл
-```
-
-## 🛠️ Налаштування
-
-Всі налаштування знаходяться в `nimda_integrated.py`:
-- Підозрілі порти: `suspicious_ports`
-- Підозрілі процеси: `suspicious_processes`
-- Майнінг процеси: `mining_processes`
-
-## 🔍 Моніторинг
-
-Система автоматично моніторить:
-- Мережеві з'єднання кожні 2 секунди
-- Процеси кожні 3 секунди
-- GPU кожні 4 секунди
-- Події безпеки кожні 3 секунди
-- Системні логи кожні 5 секунд
-- Системну інформацію кожні 4 секунди
-
-## 🚨 Lockdown режим
-
-При активації lockdown:
-1. Відключається WiFi (`ifconfig en0 down`)
-2. Відключається Bluetooth
-3. Блокуються підозрілі з'єднання
-4. Активується посилений моніторинг
-
-Для відключення:
-- Команда `U` в меню
-- Комбінація `Ctrl+L` (аварійне)
-
-## 💡 Поради
-
-1. **Навігація**: Використовуйте `Ctrl+B + цифри` для швидкого переключення
-2. **Lockdown**: Завжди тестуйте в безпечному середовищі
-3. **Моніторинг**: Панелі оновлюються автоматично
-4. **Виходування**: Використовуйте `Q` для правильного завершення
-
-## 🐛 Відомі проблеми
-
-- Lockdown потребує sudo права
-- На деяких системах Apple GPU detection може не працювати
-- TMUX може потребувати налаштування розміру терміналу
-
-## 📝 Логи
-
-Логи зберігаються в:
-- `security_monitor.log` - події безпеки
-- `nimda.log` - основні логи системи (якщо створені)
-
-## 🔊 Система звукових сповіщень
-
-### Рівні загроз та звукові сигнали:
-
-#### 🟢 LOW (Низький рівень)
-- **Частота**: кожні 30 секунд
-- **Звук**: системний звук "Tink"
-- **Сигнал**: 1 короткий beep
-- **Голос**: відсутній
-
-#### 🟡 MEDIUM (Середній рівень)
-- **Частота**: кожні 15 секунд
-- **Звук**: системний звук "Pop"
-- **Сигнал**: 2 коротких beep
-- **Голос**: відсутній
-
-#### 🟠 HIGH (Високий рівень)
-- **Частота**: кожні 5 секунд
-- **Звук**: системний звук "Sosumi"
-- **Сигнал**: 3 коротких beep
-- **Голос**: голосове повідомлення (Daniel, 250 wpm)
-
-#### 🔴 CRITICAL (Критичний рівень)
-- **Частота**: кожні 2 секунди
-- **Звук**: системний звук "Basso"
-- **Сигнал**: довгий-короткий-довгий beep
-- **Голос**: термінове голосове повідомлення (Fiona, 280 wpm)
-
-#### 🚨 EMERGENCY (Аварійний рівень)
-- **Частота**: безперервна сирена
-- **Звук**: системний звук "Funk"
-- **Сигнал**: безперервна сирена
-- **Голос**: багатомовні аварійні повідомлення (Alex, 300 wpm)
-
-### Типи загроз:
-- **NETWORK_INTRUSION** - мережеві вторгнення
-- **SUSPICIOUS_PROCESS** - підозрілі процеси
-- **GPU_MINING** - виявлення майнінгу криптовалют
-- **LOCKDOWN_BREACH** - порушення lockdown режиму
-- **SYSTEM_ERROR** - критичні системні помилки
-- **PERIPHERAL_DETECTED** - підключення неавторизованої периферії
-- **SSH_CONNECTION** - підозрілі SSH з'єднання
-- **PORT_SCAN** - сканування портів
-
-### Звукові повідомлення залежно від загроз:
-- **SSH порти (22, 2222)**: HIGH рівень з голосовим повідомленням
-- **Хакерські порти (4444, 5555, 31337, 1337)**: CRITICAL рівень
-- **Майнінг процеси**: CRITICAL рівень з детальним описом
-- **Високе CPU навантаження (>80%)**: MEDIUM рівень
-- **Lockdown активація/деактивація**: CRITICAL/MEDIUM рівень
+**NIMDA Security System** - Comprehensive security monitoring with AI-powered analysis and multi-language support.
