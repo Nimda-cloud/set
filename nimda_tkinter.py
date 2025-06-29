@@ -234,8 +234,39 @@ class ThreatAnalyzer:
         print(f"🔬 Analyzing: {target}")
     
     def _action_block(self, target: str, details: Dict):
-        """Block target"""
+        """Block target with real firewall rules"""
         print(f"🚫 Blocking: {target}")
+        
+        try:
+            # Extract IP address from target
+            if target.startswith("Port "):
+                # Block port
+                port = details.get('port', '')
+                if port:
+                    # Block port using pfctl (macOS firewall)
+                    block_command = f"echo 'block drop in proto tcp from any to any port {port}' | sudo pfctl -ef -"
+                    success, output = self.execute_with_privileges(block_command, require_privileges=True)
+                    if success:
+                        print(f"✅ Port {port} blocked successfully")
+                    else:
+                        print(f"❌ Failed to block port {port}: {output}")
+            else:
+                # Block IP address
+                # Extract IP from target (e.g., "104.18.19.125.443" -> "104.18.19.125")
+                ip_parts = target.split('.')
+                if len(ip_parts) >= 4:
+                    ip = '.'.join(ip_parts[:4])
+                    
+                    # Block IP using pfctl
+                    block_command = f"echo 'block drop in from {ip} to any' | sudo pfctl -ef -"
+                    success, output = self.execute_with_privileges(block_command, require_privileges=True)
+                    if success:
+                        print(f"✅ IP {ip} blocked successfully")
+                    else:
+                        print(f"❌ Failed to block IP {ip}: {output}")
+                        
+        except Exception as e:
+            print(f"❌ Block action failed: {e}")
     
     def _action_isolate(self, target: str, details: Dict):
         """Isolate target"""
@@ -260,6 +291,27 @@ class ThreatAnalyzer:
     def _action_trace_attack(self, target: str, details: Dict):
         """Trace attack source"""
         print(f"🔍 Tracing attack: {target}")
+    
+    def execute_with_privileges(self, command: str, require_privileges: bool = True) -> Tuple[bool, str]:
+        """Execute command with privileges"""
+        try:
+            if require_privileges:
+                # Use sudo for privileged commands
+                result = subprocess.run(['sudo', '-n'] + command.split(), 
+                                      capture_output=True, text=True, timeout=30)
+            else:
+                # Execute without privileges
+                result = subprocess.run(command.split(), 
+                                      capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                return True, result.stdout
+            else:
+                return False, result.stderr
+        except subprocess.TimeoutExpired:
+            return False, "Command timed out"
+        except Exception as e:
+            return False, str(e)
 
 class TranslationManager:
     """Translation manager for Ukrainian language"""
@@ -1892,6 +1944,12 @@ class NIMDATkinterApp:
                 'timestamp': datetime.now().isoformat()
             }
             
+            # Update UI components immediately
+            self.update_connections_tree(connections)
+            self.update_ports_tree(port_scan)
+            self.update_anomalies_tree(anomalies)
+            self.update_threat_level(security_status)
+            
             self.on_security_update(security_status)
             self.log_message(f"Initial data loaded: {len(connections)} connections, {len(port_scan)} ports")
             
@@ -1933,6 +1991,19 @@ class NIMDATkinterApp:
             
             # Update UI elements
             self.root.after(0, lambda: self.update_ui())
+            
+            # Update specific UI components
+            if 'connections' in security_status:
+                self.root.after(0, lambda: self.update_connections_tree(security_status['connections']))
+            
+            if 'port_scan' in security_status:
+                self.root.after(0, lambda: self.update_ports_tree(security_status['port_scan']))
+            
+            if 'anomalies' in security_status:
+                self.root.after(0, lambda: self.update_anomalies_tree(security_status['anomalies']))
+            
+            # Update threat level
+            self.root.after(0, lambda: self.update_threat_level(security_status))
             
             # Check for threat level changes and trigger sound alerts
             if 'threat_level' in security_status:
@@ -4440,7 +4511,8 @@ class PrivilegeManager:
     
     def __init__(self):
         self.service_name = "NIMDA_Security_System"
-        self.username = "admin"
+        # Use current user instead of "admin"
+        self.username = os.getenv('USER', 'dev')  # Get current user
         self.has_privileges = False
         self.privilege_timeout = 300  # 5 minutes
         self.privilege_start_time = None
@@ -4472,18 +4544,35 @@ class PrivilegeManager:
             return False
     
     def verify_credentials(self, password: str) -> bool:
-        """Verify provided credentials"""
+        """Verify provided credentials by testing sudo access"""
         try:
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            # Test sudo access with the provided password
+            test_command = "echo 'test'"
             
-            # Check against stored hash
-            if hasattr(self, 'stored_key_hash'):
-                return password_hash == self.stored_key_hash
+            # Ensure password is string and encode properly
+            if isinstance(password, bytes):
+                password_str = password.decode('utf-8')
+            else:
+                password_str = str(password)
             
-            # If no stored credentials, accept first time setup
-            return True
+            result = subprocess.run(['sudo', '-S', 'sh', '-c', test_command], 
+                                  input=password_str.encode('utf-8'), 
+                                  capture_output=True, 
+                                  text=True, 
+                                  timeout=10)
+            
+            if result.returncode == 0:
+                print("✅ Credentials verified successfully")
+                return True
+            else:
+                print(f"❌ Credentials verification failed: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            print("❌ Credentials verification timed out")
+            return False
         except Exception as e:
-            print(f"Failed to verify credentials: {e}")
+            print(f"❌ Credentials verification error: {e}")
             return False
     
     def request_privileges(self, password: str) -> bool:
@@ -4523,7 +4612,8 @@ class PrivilegeManager:
         
         try:
             if require_privileges:
-                # Use sudo for privileged commands
+                # Use sudo with current user for privileged commands
+                # The password should already be cached by sudo
                 result = subprocess.run(['sudo', '-n'] + command.split(), 
                                       capture_output=True, text=True, timeout=30)
             else:
