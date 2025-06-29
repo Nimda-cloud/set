@@ -2,12 +2,5 @@ psutil>=5.8.0
 colorama>=0.4.4
 requests>=2.25.1
 schedule>=1.1.0
-tkinter
-sqlite3
-threading
-datetime
-enum
-typing
-collections
-re
+python-tk>=8.6.0
 keyring>=23.0.0

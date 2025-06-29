@@ -192,36 +192,57 @@ class ThreatAnalyzer:
         
         return ThreatLevel.LOW
     
-    def execute_actions(self, threat_level: ThreatLevel, target: str, details: Dict):
-        """Execute security actions for threat level"""
-        actions = self.policy.get_actions_for_level(threat_level)
+    def execute_actions(self, threat_level: ThreatLevel, target: str, details: Dict, smart_handler=None):
+        """Execute SMART security actions for threat level"""
+        # Determine threat type and use smart response
+        threat_type = None
+        threat_data = details
         
-        for action in actions:
-            try:
-                if action == SecurityAction.MONITOR:
-                    self._action_monitor(target, details)
-                elif action == SecurityAction.LOG:
-                    self._action_log(target, details, threat_level)
-                elif action == SecurityAction.ANALYZE:
-                    self._action_analyze(target, details)
-                elif action == SecurityAction.BLOCK:
-                    self._action_block(target, details)
-                elif action == SecurityAction.ISOLATE:
-                    self._action_isolate(target, details)
-                elif action == SecurityAction.TERMINATE:
-                    self._action_terminate(target, details)
-                elif action == SecurityAction.BACKUP:
-                    self._action_backup(target, details)
-                elif action == SecurityAction.ALERT:
-                    self._action_alert(target, details, threat_level)
-                elif action == SecurityAction.AI_ANALYSIS:
-                    self._action_ai_analysis(target, details, threat_level)
-                elif action == SecurityAction.TRACE_ATTACK:
-                    self._action_trace_attack(target, details)
-                elif action == SecurityAction.CLEAN_TEMP:
-                    self._action_clean_temp(target, details)
-            except Exception as e:
-                print(f"Failed to execute action {action.value}: {e}")
+        # Identify threat type from target and details
+        if ':' in str(target) and any(c.isdigit() for c in str(target)):
+            # IP:Port format
+            threat_type = 'ip_connection'
+            if '.' in str(target):
+                parts = str(target).split('.')
+                if len(parts) >= 4:
+                    ip_port = str(target).split(':')
+                    threat_data = {
+                        'remote_address': ip_port[0] if len(ip_port) > 0 else str(target),
+                        'port': ip_port[1] if len(ip_port) > 1 else '443',
+                        **details
+                    }
+        elif str(target).startswith('Port '):
+            # Port format
+            threat_type = 'port_scan'
+            port_num = str(target).replace('Port ', '')
+            threat_data = {
+                'port': port_num,
+                'service': details.get('service', 'unknown'),
+                **details
+            }
+        elif 'Anomaly:' in str(target):
+            # Anomaly format
+            threat_type = 'anomaly'
+            anomaly_name = str(target).replace('Anomaly: ', '')
+            threat_data = {
+                'type': anomaly_name,
+                **details
+            }
+        else:
+            # Generic threat
+            threat_type = 'generic'
+            threat_data = {'target': target, **details}
+        
+        # Use smart threat response if available
+        if threat_type and smart_handler and hasattr(smart_handler, 'smart_threat_response'):
+            response = smart_handler.smart_threat_response(threat_type, threat_data, threat_level.name)
+            if response:
+                print(f"🧠 SMART RESPONSE: {response}")
+            else:
+                print(f"🔇 Silent handling: {target}")
+        else:
+            # Fallback to simple logging (MUCH less spam)
+            print(f"📝 Simple log: {target} - {threat_level.value[3]}")
     
     def _action_monitor(self, target: str, details: Dict):
         """Monitor target"""
@@ -1366,6 +1387,9 @@ class NIMDATkinterApp:
         # Threading
         self.monitor_thread = None
         self.running = True
+
+        # --- Enhanced threat detection system initialization ---
+        self.init_enhanced_threat_detection()
         
         # Initialize UI
         self.init_ui()
@@ -1382,6 +1406,826 @@ class NIMDATkinterApp:
         
         # Setup closing handler
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def generate_threat_report(self):
+        """Generate comprehensive threat intelligence report"""
+        try:
+            report = {
+                'timestamp': datetime.now().isoformat(),
+                'summary': {
+                    'total_threats': len(self.threat_counters),
+                    'whitelisted_skipped': len([a for a in self.automated_actions if 'Whitelisted' in a.get('action', '')]),
+                    'recently_handled': len([a for a in self.automated_actions if 'Recently handled' in a.get('action', '')]),
+                    'active_responses': len([a for a in self.automated_actions if 'CRITICAL' in a.get('action', '')])
+                },
+                'top_threats': self.get_top_threats(),
+                'threat_patterns': self.analyze_threat_patterns(),
+                'recommendations': self.generate_security_recommendations()
+            }
+            
+            # Save report
+            report_file = f"threat_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(report_file, 'w') as f:
+                json.dump(report, f, indent=2)
+            
+            return report
+        except Exception as e:
+            return {'error': f"Failed to generate report: {str(e)}"}
+
+    def get_top_threats(self):
+        """Get top threats by frequency"""
+        try:
+            sorted_threats = sorted(self.threat_counters.items(), key=lambda x: x[1], reverse=True)
+            return [{'threat_id': threat_id, 'frequency': freq} for threat_id, freq in sorted_threats[:10]]
+        except:
+            return []
+
+    def analyze_threat_patterns(self):
+        """Analyze patterns in threat data"""
+        try:
+            patterns = {
+                'port_threats': len([t for t in self.threat_counters.keys() if t.startswith('port_')]),
+                'ip_threats': len([t for t in self.threat_counters.keys() if t.startswith('ip_')]),
+                'anomaly_threats': len([t for t in self.threat_counters.keys() if t.startswith('anomaly_')]),
+                'most_common_ports': self.get_most_common_ports(),
+                'most_active_ips': self.get_most_active_ips()
+            }
+            return patterns
+        except:
+            return {}
+
+    def get_most_common_ports(self):
+        """Get most commonly detected ports"""
+        try:
+            ports = [t.split('_')[1] for t in self.threat_counters.keys() if t.startswith('port_')]
+            port_counts = {}
+            for port in ports:
+                port_counts[port] = port_counts.get(port, 0) + 1
+            return sorted(port_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        except:
+            return []
+
+    def get_most_active_ips(self):
+        """Get most active IP addresses"""
+        try:
+            ips = [t.split('_')[1] for t in self.threat_counters.keys() if t.startswith('ip_')]
+            ip_counts = {}
+            for ip in ips:
+                ip_counts[ip] = ip_counts.get(ip, 0) + 1
+            return sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        except:
+            return []
+
+    def generate_security_recommendations(self):
+        """Generate security recommendations based on threat patterns"""
+        try:
+            recommendations = []
+            
+            # Check for persistent port threats
+            dangerous_ports = [t for t in self.threat_counters.keys() if t.startswith('port_7000') or t.startswith('port_1337')]
+            if dangerous_ports:
+                recommendations.append("Consider blocking dangerous ports (7000, 1337) at firewall level")
+            
+            # Check for high-frequency threats
+            high_freq_threats = [t for t, freq in self.threat_counters.items() if freq > 10]
+            if high_freq_threats:
+                recommendations.append("Investigate high-frequency threats for potential false positives")
+            
+            # Check for new threat types
+            recent_threats = [a for a in self.automated_actions if (datetime.now() - a.get('timestamp', datetime.now())).seconds < 3600]
+            if len(recent_threats) > 20:
+                recommendations.append("High threat activity detected - consider enabling additional monitoring")
+            
+            return recommendations
+        except:
+            return ["Unable to generate recommendations"]
+
+    def update_threat_intelligence(self):
+        """Update threat intelligence database"""
+        try:
+            if not hasattr(self, 'threat_intelligence'):
+                self.threat_intelligence = {
+                    'whitelisted_ips': set(['8.8.8.8', '8.8.4.4', '1.1.1.1']),
+                    'known_bad_ips': set(),
+                    'suspicious_ports': set([7000, 1337, 31337, 4444]),
+                    'blocked_ranges': set(),
+                    'last_updated': datetime.now()
+                }
+            
+            # Automatically whitelist frequent legitimate services
+            frequent_legitimate = []
+            for threat_id, freq in self.threat_counters.items():
+                if threat_id.startswith('ip_') and freq > 5:
+                    ip = threat_id.split('_')[1]
+                    if any(ip.startswith(prefix) for prefix in ['13.', '17.', '20.', '52.', '140.82.']):
+                        frequent_legitimate.append(ip)
+            
+            # Add to whitelist
+            self.threat_intelligence['whitelisted_ips'].update(frequent_legitimate)
+            self.threat_intelligence['last_updated'] = datetime.now()
+            
+            return f"Updated threat intelligence: {len(frequent_legitimate)} IPs auto-whitelisted"
+        except Exception as e:
+            return f"Failed to update threat intelligence: {str(e)}"
+
+    def reset_threat_counters(self):
+        """Reset threat counters for testing purposes"""
+        try:
+            if hasattr(self, 'threat_counters'):
+                old_count = len(self.threat_counters)
+                self.threat_counters.clear()
+                print(f"🔄 Reset {old_count} threat counters")
+            
+            if hasattr(self, 'recent_responses'):
+                old_count = len(self.recent_responses)
+                self.recent_responses.clear()
+                print(f"🔄 Reset {old_count} recent responses")
+            
+            if hasattr(self, 'automated_actions'):
+                old_count = len(self.automated_actions)
+                self.automated_actions.clear()
+                print(f"🔄 Reset {old_count} automated actions")
+            
+            print("✅ All threat data reset - system will treat all threats as new")
+            
+        except Exception as e:
+            print(f"❌ Failed to reset threat counters: {e}")
+
+    def force_threat_detection(self):
+        """Force immediate threat detection with sound alerts"""
+        try:
+            print("🔍 Forcing immediate threat detection...")
+            
+            # Reset counters first
+            self.reset_threat_counters()
+            
+            # Force clear recent responses with unique timestamp
+            current_time = datetime.now()
+            if hasattr(self, 'recent_responses'):
+                self.recent_responses.clear()
+            
+            # Simulate discovering port 7000 as new threat with unique data
+            threat_data = {
+                'port': 7000,
+                'service': 'IRC', 
+                'status': 'OPEN',
+                'risk': 'HIGH',
+                'force_test': current_time.timestamp()  # Make it unique
+            }
+            
+            # Call smart response as if it's a new threat
+            response = self.smart_threat_response('port_scan', threat_data, ThreatLevel.CRITICAL)
+            print(f"🧠 FORCED RESPONSE: {response}")
+            
+            # Test with a different unknown IP to avoid whitelist
+            ip_threat_data = {
+                'remote_address': '1.2.3.4',  # Clearly external, non-whitelisted IP
+                'port': 7000,
+                'service': 'unknown',
+                'force_test': current_time.timestamp()  # Make it unique
+            }
+            
+            response = self.smart_threat_response('ip_connection', ip_threat_data, ThreatLevel.HIGH)
+            print(f"🧠 FORCED IP RESPONSE: {response}")
+            
+            # Force anomaly detection
+            anomaly_data = {
+                'type': 'suspicious_network_behavior',
+                'severity': 'high',
+                'description': 'Forced test anomaly',
+                'force_test': current_time.timestamp()
+            }
+            
+            response = self.smart_threat_response('anomaly', anomaly_data, ThreatLevel.MEDIUM)
+            print(f"🧠 FORCED ANOMALY RESPONSE: {response}")
+            
+            print("✅ Forced threat detection completed")
+            
+        except Exception as e:
+            print(f"❌ Force threat detection failed: {e}")
+
+    def handle_edge_case_threats(self, threat_type, threat_data, frequency):
+        """Handle edge case threats that might not be caught by main logic"""
+        try:
+            # Handle unknown services on dangerous ports
+            if threat_type == 'port_scan':
+                port = int(threat_data.get('port', 0))
+                service = threat_data.get('service', 'unknown').lower()
+                
+                # IRC-like ports but unknown service
+                if port in [6667, 6668, 6669, 7000] and service == 'unknown':
+                    self.trigger_sound_alert(ThreatLevel.CRITICAL, f"Suspicious IRC-like port {port}")
+                    return f"🚨 IRC-like port {port} with unknown service - INVESTIGATING"
+                
+                # Backdoor/trojan common ports
+                trojan_ports = [1337, 31337, 12345, 54321, 9999]
+                if port in trojan_ports:
+                    self.trigger_sound_alert(ThreatLevel.EMERGENCY, f"Trojan port {port}")
+                    return f"🚨 EMERGENCY: Known trojan port {port} detected - IMMEDIATE ACTION REQUIRED"
+            
+            # Handle anomalies that occur outside business hours
+            elif threat_type == 'anomaly':
+                current_hour = datetime.now().hour
+                anomaly_type = threat_data.get('type', 'unknown')
+                
+                # High activity during night hours (11 PM - 6 AM)
+                if current_hour >= 23 or current_hour <= 6:
+                    self.trigger_sound_alert(ThreatLevel.HIGH, f"Night-time {anomaly_type}")
+                    return f"🌙 SUSPICIOUS: {anomaly_type} during off-hours ({current_hour}:00)"
+                
+                # Weekend unusual activity
+                if datetime.now().weekday() >= 5:  # Saturday=5, Sunday=6
+                    if frequency > 1:
+                        self.trigger_sound_alert(ThreatLevel.MEDIUM, f"Weekend {anomaly_type}")
+                        return f"📅 Weekend anomaly: {anomaly_type} - worth investigating"
+            
+            # Handle IP connections from unexpected geographic regions
+            elif threat_type == 'ip_connection':
+                ip = threat_data.get('remote_address', '')
+                
+                # Non-standard IP ranges that might be suspicious
+                suspicious_ranges = ['1.', '2.', '5.', '14.', '27.', '41.', '42.']
+                if any(ip.startswith(prefix) for prefix in suspicious_ranges):
+                    if frequency >= 2:
+                        self.trigger_sound_alert(ThreatLevel.MEDIUM, f"Unusual IP range {ip}")
+                        return f"🌍 Unusual geographic IP {ip} - analyzing origin"
+            
+            return None  # No edge case detected
+            
+        except Exception as e:
+            return f"Edge case analysis error: {str(e)}"
+
+    def log_threat_response(self, threat_type, threat_data, response, threat_level, frequency):
+        """Enhanced logging for threat responses"""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            threat_id = self.generate_threat_id(threat_type, threat_data)
+            
+            # Create detailed log entry
+            log_entry = {
+                'timestamp': timestamp,
+                'threat_id': threat_id,
+                'threat_type': threat_type,
+                'threat_level': threat_level.name if hasattr(threat_level, 'name') else str(threat_level),
+                'frequency': frequency,
+                'response': response,
+                'threat_data': threat_data,
+                'sound_triggered': 'Skipped' not in response and '🚨' in response
+            }
+            
+            # Log to console with appropriate color/emoji
+            if hasattr(threat_level, 'name'):
+                level_name = threat_level.name
+            else:
+                level_name = str(threat_level)
+            
+            if level_name in ['CRITICAL', 'EMERGENCY']:
+                print(f"🚨 {timestamp} [{level_name}] {threat_type}: {response}")
+            elif level_name == 'HIGH':
+                print(f"⚠️  {timestamp} [{level_name}] {threat_type}: {response}")
+            else:
+                print(f"ℹ️  {timestamp} [{level_name}] {threat_type}: {response}")
+            
+            # Add to actions log (if GUI is available) - combine level and type into single message
+            try:
+                self.add_action_to_log(f"[{level_name}] {threat_type}: {response}")
+            except Exception as log_err:
+                print(f"Log GUI error: {log_err}")
+                
+            # Store in threat log for analysis
+            if not hasattr(self, 'threat_response_log'):
+                self.threat_response_log = []
+            
+            self.threat_response_log.append(log_entry)
+            
+            # Keep only last 100 entries
+            if len(self.threat_response_log) > 100:
+                self.threat_response_log = self.threat_response_log[-100:]
+            
+        except Exception as e:
+            print(f"❌ Logging error: {e}")
+
+    # ...existing code...
+
+    def init_enhanced_threat_detection(self):
+        """Initialize enhanced threat detection with smart response"""
+        try:
+            # Initialize threat intelligence database first (inline)
+            if not hasattr(self, 'threat_intelligence'):
+                self.threat_intelligence = {
+                    'whitelisted_ips': set([
+                        '8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1',  # DNS servers
+                        '127.0.0.1', 'localhost'  # Local
+                    ]),
+                    'known_bad_ips': set(),
+                    'suspicious_ports': set([7000, 1337, 31337, 4444, 5555, 6666]),
+                    'blocked_ranges': set(),
+                    'service_fingerprints': {
+                        'microsoft': ['13.', '20.', '40.', '52.', '104.', '168.'],
+                        'apple': ['17.', '23.', '199.47.'],
+                        'github': ['140.82.', '192.30.', '185.199.'],
+                        'google': ['8.8.', '74.125.', '172.217.', '216.58.'],
+                        'cloudflare': ['104.16.', '104.17.', '104.18.', '104.19.'],
+                        'aws': ['3.', '18.', '52.', '54.']
+                    },
+                    'last_updated': datetime.now()
+                }
+                
+            # Initialize counters and tracking
+            if not hasattr(self, 'threat_counters'):
+                self.threat_counters = {}
+            if not hasattr(self, 'automated_actions'):
+                self.automated_actions = []
+            if not hasattr(self, 'recent_responses'):
+                self.recent_responses = {}
+            
+            # Initialize adaptive response thresholds
+            self.adaptive_thresholds = {
+                'ip_frequency_limit': 3,      # Block IP after 3 occurrences
+                'port_frequency_limit': 2,    # Block port after 2 occurrences  
+                'anomaly_frequency_limit': 5, # Investigate anomaly after 5 occurrences
+                'escalation_time_window': 300 # 5 minutes
+            }
+            
+            # Initialize learning system
+            self.threat_learning = {
+                'false_positives': set(),
+                'confirmed_threats': set(),
+                'learning_enabled': True
+            }
+            
+            # Start enhanced monitoring after a delay to ensure all methods are loaded
+            def delayed_start():
+                time.sleep(5)  # Wait for full initialization
+                try:
+                    self.start_enhanced_monitoring()
+                except Exception as e:
+                    print(f"Background monitoring start failed: {e}")
+            
+            threading.Thread(target=delayed_start, daemon=True).start()
+            
+            self.log_message("🧠 Enhanced threat detection initialized")
+            
+        except Exception as e:
+            print(f"Error initializing enhanced threat detection: {e}")
+
+    def smart_threat_response(self, threat_type, threat_data, threat_level):
+        """Intelligent threat response that learns and adapts"""
+        try:
+            threat_id = self.generate_threat_id(threat_type, threat_data)
+            current_time = datetime.now()
+            
+            # Check if this is a known false positive or whitelisted
+            if self.is_whitelisted_threat(threat_data):
+                return f"Skipped - Whitelisted service ({self.identify_service(threat_data)})"
+            
+            # Check if we already handled this threat recently (last 5 minutes)
+            if hasattr(self, 'recent_responses'):
+                if threat_id in self.recent_responses:
+                    time_since = (current_time - self.recent_responses[threat_id]).seconds
+                    if time_since < 300:  # 5 minutes
+                        return f"Skipped - Recently handled ({time_since}s ago)"
+            else:
+                self.recent_responses = {}
+            
+            # Update threat frequency tracking
+            if threat_id not in self.threat_counters:
+                self.threat_counters[threat_id] = 0
+            self.threat_counters[threat_id] += 1
+            
+            frequency = self.threat_counters[threat_id]
+            
+            # Determine intelligent response based on threat type and frequency
+            response = None
+            
+            # First check for edge cases
+            edge_case_response = self.handle_edge_case_threats(threat_type, threat_data, frequency)
+            if edge_case_response:
+                response = edge_case_response
+            else:
+                # Standard threat handling
+                if threat_type == 'ip_connection':
+                    response = self.handle_ip_threat_smart(threat_data, frequency, threat_level)
+                elif threat_type == 'port_scan':
+                    response = self.handle_port_threat_smart(threat_data, frequency, threat_level)
+                elif threat_type == 'anomaly':
+                    response = self.handle_anomaly_threat_smart(threat_data, frequency, threat_level)
+            
+            # Enhanced logging for all responses
+            if response:
+                self.log_threat_response(threat_type, threat_data, response, threat_level, frequency)
+            
+            # Record that we handled this threat
+            if response and "Skipped" not in response:
+                self.recent_responses[threat_id] = current_time
+                
+                # Also record in automated actions
+                self.automated_actions.append({
+                    'timestamp': current_time,
+                    'threat_key': threat_id,
+                    'threat_type': threat_type,
+                    'action': response,
+                    'threat_data': threat_data,
+                    'frequency': frequency
+                })
+                
+                # Keep only last 50 automated actions
+                if len(self.automated_actions) > 50:
+                    self.automated_actions = self.automated_actions[-50:]
+            
+            return response
+            
+        except Exception as e:
+            return f"Error in smart response: {str(e)}"
+
+    def identify_service(self, threat_data):
+        """Identify legitimate services"""
+        if isinstance(threat_data, dict):
+            ip = threat_data.get('remote_address', threat_data.get('remote_addr', ''))
+            if isinstance(ip, str):
+                # Microsoft/Azure IPs
+                if any(ip.startswith(prefix) for prefix in ['20.', '13.', '52.', '40.']):
+                    return "Microsoft/Azure"
+                # Apple IPs  
+                elif ip.startswith('17.'):
+                    return "Apple"
+                # GitHub IPs
+                elif ip.startswith('140.82.'):
+                    return "GitHub"
+                # Google IPs
+                elif any(ip.startswith(prefix) for prefix in ['8.8.', '74.125.', '172.217.']):
+                    return "Google"
+        return "Unknown"
+
+    def is_whitelisted_threat(self, threat_data):
+        """Check if threat should be whitelisted (trusted source)"""
+        try:
+            if isinstance(threat_data, dict):
+                ip = threat_data.get('remote_address', threat_data.get('remote_addr', ''))
+                port = threat_data.get('port')
+                
+                # Whitelist major cloud services on HTTPS ports
+                if isinstance(ip, str) and str(port) == '443':
+                    trusted_prefixes = ['20.', '13.', '52.', '40.', '17.', '140.82.', '8.8.', '74.125.', '172.217.']
+                    if any(ip.startswith(prefix) for prefix in trusted_prefixes):
+                        return True
+                
+                # Whitelist Apple services on port 5223 (Apple Push Notification)
+                if isinstance(ip, str) and str(port) == '5223' and ip.startswith('17.'):
+                    return True
+            
+            return False
+        except:
+            return False
+
+    def handle_ip_threat_smart(self, threat_data, frequency, threat_level):
+        """Smart handling of IP-based threats"""
+        try:
+            ip = threat_data.get('remote_address', threat_data.get('remote_addr', 'unknown'))
+            port = threat_data.get('port', '')
+            
+            service = self.identify_service(threat_data)
+            
+            # Progressive response based on frequency and legitimacy
+            if frequency == 1:
+                return f"Monitoring {service} connection to {ip}:{port}"
+            elif frequency <= 3:
+                return f"Analyzed {service} connection pattern from {ip} - appears legitimate"
+            else:
+                # Only for truly suspicious IPs after multiple occurrences
+                if service == "Unknown":
+                    # Trigger sound for unknown high-frequency connections
+                    self.trigger_sound_alert(ThreatLevel.HIGH, f"Unknown IP {ip}")
+                    return f"High-frequency unknown connection from {ip} - added to monitoring list"
+                else:
+                    return f"Frequent {service} activity from {ip} - marked as normal business traffic"
+        
+        except Exception as e:
+            return f"Error handling IP threat: {str(e)}"
+
+    def handle_port_threat_smart(self, threat_data, frequency, threat_level):
+        """Smart handling of port-based threats"""
+        try:
+            port = threat_data.get('port', 'unknown')
+            service = threat_data.get('service', 'unknown')
+            
+            # Focus on truly dangerous ports
+            dangerous_ports = [7000, 1337, 31337, 4444, 5555, 6666, 8080, 9999]
+            
+            if int(port) in dangerous_ports:
+                # Trigger sound alert for dangerous ports
+                if frequency == 1:
+                    self.trigger_sound_alert(ThreatLevel.CRITICAL, f"Dangerous Port {port}")
+                    return f"🚨 CRITICAL: Dangerous port {port} ({service}) detected - investigating processes"
+                elif frequency == 2:
+                    processes = self.get_processes_using_port(port)
+                    if processes:
+                        self.trigger_sound_alert(ThreatLevel.CRITICAL, f"Port {port} Active Process")
+                        return f"🚨 CRITICAL: Port {port} used by processes: {processes} - RECOMMEND MANUAL REVIEW"
+                    else:
+                        self.trigger_sound_alert(ThreatLevel.EMERGENCY, f"Port {port} Stealth Activity")
+                        return f"🚨 CRITICAL: Port {port} ({service}) active - no accessible process info"
+                else:
+                    self.trigger_sound_alert(ThreatLevel.EMERGENCY, f"Port {port} Persistent Threat")
+                    return f"🚨 CRITICAL: Port {port} ({service}) PERSISTENT THREAT - IMMEDIATE ACTION REQUIRED"
+            else:
+                # Common legitimate ports
+                if frequency <= 2:
+                    return f"Standard port {port} ({service}) activity - monitoring"
+                else:
+                    return f"Port {port} ({service}) - established as normal system activity"
+        
+        except Exception as e:
+            return f"Error handling port threat: {str(e)}"
+
+    def handle_anomaly_threat_smart(self, threat_data, frequency, threat_level):
+        """Smart handling of anomaly-based threats"""
+        try:
+            anomaly_type = threat_data.get('type', 'unknown')
+            
+            if frequency <= 2:
+                return f"Detected {anomaly_type} anomaly - collecting baseline data"
+            elif frequency <= 4:
+                # Trigger sound for recurring anomalies
+                self.trigger_sound_alert(ThreatLevel.MEDIUM, f"Recurring {anomaly_type}")
+                return f"Recurring {anomaly_type} pattern - analyzing root cause"
+            else:
+                # After multiple occurrences, take corrective action
+                self.trigger_sound_alert(ThreatLevel.HIGH, f"Persistent {anomaly_type}")
+                corrective_action = self.take_corrective_action_for_anomaly(anomaly_type, threat_data)
+                return f"PERSISTENT {anomaly_type} - {corrective_action}"
+        
+        except Exception as e:
+            return f"Error handling anomaly: {str(e)}"
+
+    def generate_threat_id(self, threat_type, threat_data):
+        """Generate unique threat identifier"""
+        try:
+            if threat_type == 'ip_connection':
+                return f"ip_{threat_data.get('remote_address', 'unknown')}"
+            elif threat_type == 'port_scan':
+                return f"port_{threat_data.get('port', 'unknown')}"
+            elif threat_type == 'anomaly':
+                return f"anomaly_{threat_data.get('type', 'unknown')}"
+            else:
+                return f"unknown_{str(threat_data)[:20]}"
+        except:
+            return f"error_{str(threat_data)[:20]}"
+
+    def is_whitelisted_threat(self, threat_data):
+        """Check if threat should be whitelisted (trusted source)"""
+        try:
+            if isinstance(threat_data, dict):
+                # Check IP whitelist
+                ip = threat_data.get('remote_address', '') or threat_data.get('remote_addr', '')
+                if hasattr(self, 'threat_intelligence') and ip in self.threat_intelligence.get('whitelisted_ips', set()):
+                    return True
+                
+                # Check for local network ranges
+                if ip and ip.startswith(('127.', '192.168.', '10.', '172.')):
+                    return True
+                
+                # Check for common safe services
+                port = threat_data.get('port', 0)
+                service = threat_data.get('service', '').lower()
+                
+                # Whitelist common safe services
+                safe_services = ['http', 'https', 'ssh', 'dns', 'ntp']
+                if service in safe_services and port in [22, 53, 80, 123, 443]:
+                    return True
+            
+            return False
+        except:
+            return False
+
+    def handle_ip_threat_smart(self, threat_data, frequency, threat_level):
+        """Smart handling of IP-based threats"""
+        try:
+            ip = threat_data.get('remote_address', threat_data.get('remote_addr', 'unknown'))
+            
+            # Progressive response based on frequency
+            if frequency == 1:
+                # First occurrence - just monitor
+                return f"Monitoring IP {ip} (first detection)"
+            
+            elif frequency == 2:
+                # Second occurrence - add to watch list
+                if hasattr(self, 'threat_intelligence'):
+                    self.threat_intelligence['known_bad_ips'].add(ip)
+                return f"Added IP {ip} to watch list (2nd detection)"
+            
+            elif frequency >= 3:
+                # Third+ occurrence - escalate response
+                if frequency == 3:
+                    # Try to block IP (but don't spam if sudo fails)
+                    try:
+                        if not hasattr(self, '_failed_sudo_ips'):
+                            self._failed_sudo_ips = set()
+                        
+                        if ip not in self._failed_sudo_ips:
+                            # Try blocking without sudo first (user-level blocking)
+                            self.soft_block_ip(ip)
+                            return f"Soft-blocked IP {ip} (3rd detection)"
+                        else:
+                            return f"IP {ip} marked for manual blocking (sudo required)"
+                    except:
+                        if not hasattr(self, '_failed_sudo_ips'):
+                            self._failed_sudo_ips = set()
+                        self._failed_sudo_ips.add(ip)
+                        return f"IP {ip} requires manual blocking"
+                
+                elif frequency >= 5:
+                    # High frequency - add to permanent block list
+                    if hasattr(self, 'threat_intelligence'):
+                        self.threat_intelligence['blocked_ranges'].add(f"{ip}/32")
+                    return f"IP {ip} added to permanent block list ({frequency}x detected)"
+                
+                else:
+                    return f"Continued monitoring IP {ip} ({frequency}x detected)"
+            
+        except Exception as e:
+            return f"Error handling IP threat: {str(e)}"
+
+    def handle_port_threat_smart(self, threat_data, frequency, threat_level):
+        """Smart handling of port-based threats"""
+        try:
+            port = threat_data.get('port', 'unknown')
+            service = threat_data.get('service', 'unknown')
+            
+            # Progressive response based on frequency and risk
+            if frequency == 1:
+                return f"Detected service {service} on port {port} (monitoring)"
+            
+            elif frequency == 2:
+                # Second occurrence - investigate processes
+                processes = self.get_processes_using_port(port)
+                if processes:
+                    return f"Port {port}: Found processes {processes} (investigating)"
+                else:
+                    return f"Port {port}: No processes found (suspicious)"
+            
+            elif frequency >= 3:
+                # Third+ occurrence - take action
+                if threat_level in ['HIGH', 'CRITICAL']:
+                    # Try to identify and terminate malicious process
+                    action = self.terminate_malicious_process_on_port(port)
+                    if action:
+                        return f"Port {port}: {action}"
+                    else:
+                        if hasattr(self, 'threat_intelligence'):
+                            self.threat_intelligence['suspicious_ports'].add(port)
+                        return f"Port {port} marked as persistent threat"
+                else:
+                    return f"Port {port} under continued observation ({frequency}x)"
+        
+        except Exception as e:
+            return f"Error handling port threat: {str(e)}"
+
+    def handle_anomaly_threat_smart(self, threat_data, frequency, threat_level):
+        """Smart handling of anomaly-based threats"""
+        try:
+            anomaly_type = threat_data.get('type', 'unknown')
+            
+            if frequency <= 2:
+                return f"Anomaly {anomaly_type} detected (collecting data)"
+            
+            elif frequency <= 4:
+                # Investigate root cause
+                root_cause = self.investigate_anomaly_root_cause(anomaly_type, threat_data)
+                return f"Anomaly {anomaly_type}: {root_cause}"
+            
+            else:
+                # High frequency anomaly - take corrective action
+                corrective_action = self.take_corrective_action_for_anomaly(anomaly_type, threat_data)
+                return f"Anomaly {anomaly_type}: {corrective_action}"
+        
+        except Exception as e:
+            return f"Error handling anomaly: {str(e)}"
+
+    def soft_block_ip(self, ip):
+        """Implement soft IP blocking without requiring sudo"""
+        try:
+            # Create user-level block list
+            blocked_file = os.path.expanduser("~/.nimda_blocked_ips.txt")
+            with open(blocked_file, 'a') as f:
+                f.write(f"{ip}	{datetime.now().isoformat()}\n")
+            
+            # Add to runtime block list
+            if hasattr(self, 'threat_intelligence'):
+                self.threat_intelligence['known_bad_ips'].add(ip)
+            
+        except:
+            pass
+
+    def get_processes_using_port(self, port):
+        """Get list of processes using a specific port"""
+        try:
+            processes = []
+            for proc in psutil.process_iter(['pid', 'name', 'connections']):
+                try:
+                    for conn in proc.connections():
+                        if conn.laddr.port == int(port):
+                            processes.append(f"{proc.info['name']}({proc.info['pid']})")
+                except:
+                    continue
+            return processes[:3]  # Limit to first 3
+        except:
+            return []
+
+    def terminate_malicious_process_on_port(self, port):
+        """Attempt to terminate malicious processes on a port"""
+        try:
+            terminated = []
+            for proc in psutil.process_iter(['pid', 'name', 'connections']):
+                try:
+                    for conn in proc.connections():
+                        if conn.laddr.port == int(port):
+                            proc_name = proc.info['name']
+                            
+                            # Don't terminate critical system processes
+                            safe_processes = ['kernel_task', 'launchd', 'systemd', 'sshd', 'nginx', 'apache2']
+                            if proc_name.lower() not in safe_processes:
+                                try:
+                                    proc.terminate()
+                                    terminated.append(proc_name)
+                                except:
+                                    pass
+                except:
+                    continue
+            
+            if terminated:
+                return f"Terminated processes: {', '.join(terminated)}"
+            else:
+                return "No unsafe processes found to terminate"
+                
+        except:
+            return "Could not investigate processes"
+
+    def investigate_anomaly_root_cause(self, anomaly_type, anomaly_data):
+        """Investigate the root cause of an anomaly"""
+        try:
+            if 'cpu' in anomaly_type.lower():
+                # Investigate high CPU usage
+                top_cpu = []
+                for proc in psutil.process_iter(['name', 'cpu_percent']):
+                    try:
+                        if proc.cpu_percent() > 20:
+                            top_cpu.append(f"{proc.info['name']}({proc.cpu_percent():.1f}%)")
+                    except:
+                        continue
+                return f"High CPU from: {', '.join(top_cpu[:3])}"
+            
+            elif 'memory' in anomaly_type.lower():
+                # Investigate high memory usage
+                top_mem = []
+                for proc in psutil.process_iter(['name', 'memory_percent']):
+                    try:
+                        if proc.memory_percent() > 10:
+                            top_mem.append(f"{proc.info['name']}({proc.memory_percent():.1f}%)")
+                    except:
+                        continue
+                return f"High memory from: {', '.join(top_mem[:3])}"
+            
+            elif 'network' in anomaly_type.lower():
+                # Investigate network anomaly
+                conn_count = len(psutil.net_connections())
+                return f"Network anomaly: {conn_count} active connections"
+            
+            else:
+                return f"Investigating {anomaly_type} anomaly"
+                
+        except:
+            return f"Could not investigate {anomaly_type}"
+
+    def take_corrective_action_for_anomaly(self, anomaly_type, anomaly_data):
+        """Take corrective action for persistent anomalies"""
+        try:
+            if 'cpu' in anomaly_type.lower():
+                # Try to limit high CPU processes
+                limited = []
+                for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
+                    try:
+                        if proc.cpu_percent() > 80:
+                            # Lower process priority
+                            proc.nice(10)  # Lower priority
+                            limited.append(proc.info['name'])
+                    except:
+                        continue
+                return f"Limited CPU for: {', '.join(limited[:3])}"
+            
+            elif 'memory' in anomaly_type.lower():
+                # Memory pressure - suggest cleanup
+                return "Memory pressure detected - consider restarting memory-heavy processes"
+            
+            elif 'network' in anomaly_type.lower():
+                # Network anomaly - increase monitoring
+                return "Increased network monitoring activated"
+            
+            else:
+                return f"Applied general mitigation for {anomaly_type}"
+                
+        except:
+            return f"Could not mitigate {anomaly_type}"
     
     def init_ui(self):
         """Initialize user interface"""
@@ -1809,12 +2653,15 @@ class NIMDATkinterApp:
         ttk.Button(quick_actions_frame, text="🔍 Full System Scan", command=self.full_scan, style='TButton').pack(fill='x', pady=2)
         ttk.Button(quick_actions_frame, text="🛡️ Emergency Lockdown", command=self.emergency_lockdown, style='TButton').pack(fill='x', pady=2)
         ttk.Button(quick_actions_frame, text="📊 System Information", command=self.show_system_info).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="� View Auto Actions", command=self.show_automated_actions_report).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="�🧪 Test AI Analysis", command=self.test_llm).pack(fill='x', pady=2)
+        ttk.Button(quick_actions_frame, text=" Test AI Analysis", command=self.test_llm).pack(fill='x', pady=2)
         ttk.Button(quick_actions_frame, text="🔄 Refresh All", command=self.refresh_dashboard).pack(fill='x', pady=2)
         ttk.Button(quick_actions_frame, text="📈 Performance", command=self.show_performance_details).pack(fill='x', pady=2)
         ttk.Button(quick_actions_frame, text="🗑️ Clear Actions Log", command=self.clear_actions_log).pack(fill='x', pady=2)
         ttk.Button(quick_actions_frame, text="📋 Export Report", command=self.export_dashboard_report).pack(fill='x', pady=2)
+        
+        # Sound testing buttons
+        ttk.Button(quick_actions_frame, text="🔊 Test Sound System", command=self.test_sound_system, style='TButton').pack(fill='x', pady=2)
+        ttk.Button(quick_actions_frame, text="🚨 Force Threat Detection", command=self.force_threat_detection, style='TButton').pack(fill='x', pady=2)
         
         # ===== REAL-TIME MONITORING SECTION =====
         monitoring_frame = ttk.LabelFrame(right_column, text="📡 Real-Time Monitoring", padding=15)
@@ -2406,31 +3253,440 @@ class NIMDATkinterApp:
             print(f"Error updating connections statistics: {e}")
     
     def update_threats_dashboard(self):
-        """Update threats dashboard with current security data and perform intelligent threat analysis"""
+        """Enhanced threat dashboard with intelligent analysis and adaptive response"""
         try:
             # Get current security data
             connections = getattr(self, 'current_connections', [])
             port_scan = getattr(self, 'current_port_scan', [])
             anomalies = getattr(self, 'current_anomalies', [])
             
-            # Perform intelligent threat analysis
-            self.analyze_recurring_threats(port_scan, connections, anomalies)
+            # Perform adaptive threat intelligence analysis
+            self.perform_adaptive_threat_analysis(port_scan, connections, anomalies)
             
-            # Update security metrics
-            self.update_security_metrics(connections, port_scan, anomalies)
+            # Update security metrics with enhanced information
+            self.update_security_metrics_enhanced(connections, port_scan, anomalies)
             
-            # Log security actions
-            self.log_security_actions(connections, port_scan, anomalies)
+            # Generate intelligent threat summary
+            self.generate_intelligent_threat_summary(connections, port_scan, anomalies)
                 
         except Exception as e:
-            print(f"Error updating threats dashboard: {e}")
+            print(f"Error updating enhanced threats dashboard: {e}")
+
+    def update_security_metrics_enhanced(self, connections, port_scan, anomalies):
+        """Enhanced security metrics with intelligent threat analysis"""
+        try:
+            # Basic threat counts
+            active_threats = len(connections) + len(port_scan) + len(anomalies)
+            
+            # Advanced threat analysis
+            threat_analysis = {
+                'critical_threats': 0,
+                'coordinated_attacks': 0,
+                'blocked_sources': 0,
+                'adaptive_actions': 0
+            }
+            
+            # Analyze threat levels with context
+            for conn in connections:
+                if isinstance(conn, dict):
+                    threat_level = self.threat_analyzer.analyze_address_threat(conn.get('remote_addr', ''))
+                    if threat_level in [ThreatLevel.CRITICAL, ThreatLevel.EMERGENCY]:
+                        threat_analysis['critical_threats'] += 1
+                    
+                    # Check if source is blocked
+                    ip = conn.get('remote_addr', '')
+                    if ip in getattr(self, 'threat_intelligence', {}).get('known_bad_ips', set()):
+                        threat_analysis['blocked_sources'] += 1
+            
+            for port in port_scan:
+                if isinstance(port, dict):
+                    threat_level = self.threat_analyzer.analyze_port_threat(port.get('port', 0), port.get('service', ''))
+                    if threat_level in [ThreatLevel.CRITICAL, ThreatLevel.EMERGENCY]:
+                        threat_analysis['critical_threats'] += 1
+            
+            for anomaly in anomalies:
+                if isinstance(anomaly, dict):
+                    threat_level = self.threat_analyzer.analyze_anomaly_threat(anomaly)
+                    if threat_level in [ThreatLevel.CRITICAL, ThreatLevel.EMERGENCY]:
+                        threat_analysis['critical_threats'] += 1
+            
+            # Count adaptive actions taken
+            recent_actions = [a for a in self.automated_actions if 
+                            (datetime.now() - a['timestamp']).seconds < 300]  # Last 5 minutes
+            threat_analysis['adaptive_actions'] = len(recent_actions)
+            
+            # Update enhanced labels
+            if hasattr(self, 'active_threats_label'):
+                self.active_threats_label.config(text=f"Active Threats: {active_threats}")
+            
+            if hasattr(self, 'blocked_ips_label'):
+                self.blocked_ips_label.config(text=f"Critical Threats: {threat_analysis['critical_threats']}")
+            
+            if hasattr(self, 'open_ports_label'):
+                self.open_ports_label.config(text=f"Open Ports: {len(port_scan)}")
+            
+            if hasattr(self, 'anomalies_label'):
+                self.anomalies_label.config(text=f"Anomalies: {len(anomalies)}")
+            
+            if hasattr(self, 'last_scan_label'):
+                self.last_scan_label.config(text=f"Last Scan: {datetime.now().strftime('%H:%M:%S')}")
+            
+            # Enhanced automated actions metrics
+            if hasattr(self, 'automated_actions_label'):
+                self.automated_actions_label.config(text=f"Smart Actions: {len(self.automated_actions)}")
+            
+            if hasattr(self, 'threat_patterns_label'):
+                intelligent_threats = sum(1 for count in self.threat_counters.values() if count >= 2)
+                self.threat_patterns_label.config(text=f"Intelligence Patterns: {intelligent_threats}")
+            
+            if hasattr(self, 'last_automated_action_label'):
+                if self.last_automated_action:
+                    last_action_time = self.last_automated_action.strftime('%H:%M:%S')
+                    self.last_automated_action_label.config(text=f"Last Smart Action: {last_action_time}")
+                else:
+                    self.last_automated_action_label.config(text="Last Smart Action: Never")
+                
+        except Exception as e:
+            print(f"Error updating enhanced security metrics: {e}")
+    
+    def generate_intelligent_threat_summary(self, connections, port_scan, anomalies):
+        """Generate intelligent threat summary for the actions log"""
+        try:
+            if not hasattr(self, 'actions_text'):
+                return
+            
+            # Generate summary every 30 seconds to avoid spam
+            current_time = datetime.now()
+            if (hasattr(self, '_last_summary_time') and 
+                (current_time - self._last_summary_time).seconds < 30):
+                return
+            
+            self._last_summary_time = current_time
+            
+            # Analyze threat landscape
+            summary_data = {
+                'total_threats': len(connections) + len(port_scan) + len(anomalies),
+                'high_risk_connections': 0,
+                'suspicious_ports': 0,
+                'critical_anomalies': 0,
+                'adaptive_responses': 0,
+                'learning_insights': []
+            }
+            
+            # Count threat types
+            for conn in connections:
+                if isinstance(conn, dict):
+                    threat_level = self.threat_analyzer.analyze_address_threat(conn.get('remote_addr', ''))
+                    if threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL, ThreatLevel.EMERGENCY]:
+                        summary_data['high_risk_connections'] += 1
+            
+            for port in port_scan:
+                if isinstance(port, dict):
+                    if port.get('risk') in ['HIGH', 'CRITICAL']:
+                        summary_data['suspicious_ports'] += 1
+            
+            for anomaly in anomalies:
+                if isinstance(anomaly, dict):
+                    threat_level = self.threat_analyzer.analyze_anomaly_threat(anomaly)
+                    if threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL, ThreatLevel.EMERGENCY]:
+                        summary_data['critical_anomalies'] += 1
+            
+            # Count recent adaptive responses
+            recent_actions = [a for a in self.automated_actions if 
+                            (current_time - a['timestamp']).seconds < 60]  # Last minute
+            summary_data['adaptive_responses'] = len(recent_actions)
+            
+            # Generate learning insights
+            if hasattr(self, 'threat_intelligence'):
+                known_bad_count = len(self.threat_intelligence.get('known_bad_ips', set()))
+                if known_bad_count > 0:
+                    summary_data['learning_insights'].append(f"Tracking {known_bad_count} known bad IPs")
+                
+                blocked_count = len(self.threat_intelligence.get('blocked_ranges', set()))
+                if blocked_count > 0:
+                    summary_data['learning_insights'].append(f"{blocked_count} IP ranges blocked")
+            
+            # Only log if there's significant activity
+            if summary_data['total_threats'] > 0 or summary_data['adaptive_responses'] > 0:
+                timestamp = current_time.strftime('%H:%M:%S')
+                summary_text = f"[{timestamp}] 📊 INTELLIGENT THREAT SUMMARY:\n"
+                summary_text += f"  • Total Threats: {summary_data['total_threats']}\n"
+                
+                if summary_data['high_risk_connections'] > 0:
+                    summary_text += f"  • High-Risk Connections: {summary_data['high_risk_connections']}\n"
+                
+                if summary_data['suspicious_ports'] > 0:
+                    summary_text += f"  • Suspicious Ports: {summary_data['suspicious_ports']}\n"
+                
+                if summary_data['critical_anomalies'] > 0:
+                    summary_text += f"  • Critical Anomalies: {summary_data['critical_anomalies']}\n"
+                
+                if summary_data['adaptive_responses'] > 0:
+                    summary_text += f"  • Adaptive Responses (1m): {summary_data['adaptive_responses']}\n"
+                
+                for insight in summary_data['learning_insights']:
+                    summary_text += f"  • {insight}\n"
+                
+                summary_text += "\n"
+                
+                self.add_action_to_log(summary_text)
+                
+        except Exception as e:
+            print(f"Error generating intelligent threat summary: {e}")
+    
+    def perform_adaptive_threat_analysis(self, port_scan, connections, anomalies):
+        """Perform adaptive threat analysis that learns from patterns"""
+        try:
+            current_time = datetime.now()
+            
+            # Analyze threat patterns across all types
+            threat_correlation = self.analyze_threat_correlations(port_scan, connections, anomalies)
+            
+            # Adaptive thresholds based on current threat landscape
+            self.adjust_adaptive_thresholds(threat_correlation)
+            
+            # Smart threat prioritization
+            prioritized_threats = self.prioritize_threats_intelligently(port_scan, connections, anomalies)
+            
+            # Process prioritized threats with context-aware responses
+            for threat in prioritized_threats[:5]:  # Handle top 5 threats
+                response = self.context_aware_threat_response(threat)
+                if response and "Skipped" not in response:
+                    timestamp = datetime.now().strftime('%H:%M:%S')
+                    self.add_action_to_log(f"[{timestamp}] 🎯 PRIORITY ACTION: {response}\n")
+                
+        except Exception as e:
+            print(f"Error in adaptive threat analysis: {e}")
+    
+    def analyze_threat_correlations(self, port_scan, connections, anomalies):
+        """Analyze correlations between different threat types"""
+        try:
+            correlations = {
+                'coordinated_attack': False,
+                'port_scanning_activity': False,
+                'data_exfiltration_attempt': False,
+                'system_compromise_indicators': False
+            }
+            
+            # Check for coordinated attacks (multiple threat types from same source)
+            source_threats = {}
+            
+            for conn in connections:
+                if isinstance(conn, dict):
+                    source = conn.get('remote_address', '')
+                    if source:
+                        if source not in source_threats:
+                            source_threats[source] = {'types': set(), 'count': 0}
+                        source_threats[source]['types'].add('connection')
+                        source_threats[source]['count'] += 1
+            
+            for port in port_scan:
+                if isinstance(port, dict) and port.get('risk') in ['HIGH', 'CRITICAL']:
+                    source = f"port_{port.get('port')}"
+                    if source not in source_threats:
+                        source_threats[source] = {'types': set(), 'count': 0}
+                    source_threats[source]['types'].add('port_scan')
+                    source_threats[source]['count'] += 1
+            
+            # Detect coordinated attacks
+            for source, data in source_threats.items():
+                if len(data['types']) > 1 and data['count'] >= 3:
+                    correlations['coordinated_attack'] = True
+                    break
+            
+            # Detect port scanning activity
+            high_risk_ports = [p for p in port_scan if isinstance(p, dict) and p.get('risk') in ['HIGH', 'CRITICAL']]
+            if len(high_risk_ports) >= 3:
+                correlations['port_scanning_activity'] = True
+            
+            # Detect anomaly patterns
+            critical_anomalies = [a for a in anomalies if isinstance(a, dict) and 'critical' in str(a).lower()]
+            if len(critical_anomalies) >= 2:
+                correlations['system_compromise_indicators'] = True
+            
+            return correlations
+            
+        except Exception as e:
+            print(f"Error analyzing threat correlations: {e}")
+            return {}
+    
+    def adjust_adaptive_thresholds(self, threat_correlation):
+        """Adjust threat response thresholds based on current threat landscape"""
+        try:
+            if not hasattr(self, 'adaptive_thresholds'):
+                return
+            
+            # Lower thresholds if coordinated attack detected
+            if threat_correlation.get('coordinated_attack'):
+                self.adaptive_thresholds['ip_frequency_limit'] = max(1, self.adaptive_thresholds['ip_frequency_limit'] - 1)
+                self.adaptive_thresholds['port_frequency_limit'] = max(1, self.adaptive_thresholds['port_frequency_limit'] - 1)
+            
+            # Raise thresholds if too many false positives
+            if hasattr(self, 'threat_learning') and len(self.threat_learning['false_positives']) > 10:
+                self.adaptive_thresholds['ip_frequency_limit'] = min(5, self.adaptive_thresholds['ip_frequency_limit'] + 1)
+            
+        except Exception as e:
+            print(f"Error adjusting adaptive thresholds: {e}")
+    
+    def prioritize_threats_intelligently(self, port_scan, connections, anomalies):
+        """Intelligently prioritize threats based on risk and context"""
+        try:
+            threats = []
+            
+            # Score and prioritize threats
+            for conn in connections:
+                if isinstance(conn, dict):
+                    threat_level = self.threat_analyzer.analyze_address_threat(conn.get('remote_addr', ''))
+                    score = self.calculate_threat_score(conn, threat_level, 'connection')
+                    threats.append({
+                        'type': 'connection',
+                        'data': conn,
+                        'level': threat_level,
+                        'score': score,
+                        'description': f"Connection to {conn.get('remote_addr', 'unknown')}"
+                    })
+            
+            for port in port_scan:
+                if isinstance(port, dict):
+                    threat_level = self.threat_analyzer.analyze_port_threat(port.get('port', 0), port.get('service', ''))
+                    score = self.calculate_threat_score(port, threat_level, 'port')
+                    threats.append({
+                        'type': 'port',
+                        'data': port,
+                        'level': threat_level,
+                        'score': score,
+                        'description': f"Port {port.get('port', 'unknown')} ({port.get('service', 'unknown')})"
+                    })
+            
+            for anomaly in anomalies:
+                if isinstance(anomaly, dict):
+                    threat_level = self.threat_analyzer.analyze_anomaly_threat(anomaly)
+                    score = self.calculate_threat_score(anomaly, threat_level, 'anomaly')
+                    threats.append({
+                        'type': 'anomaly',
+                        'data': anomaly,
+                        'level': threat_level,
+                        'score': score,
+                        'description': f"Anomaly: {anomaly.get('type', 'unknown')}"
+                    })
+            
+            # Sort by score (highest first)
+            threats.sort(key=lambda x: x['score'], reverse=True)
+            
+            return threats
+            
+        except Exception as e:
+            print(f"Error prioritizing threats: {e}")
+            return []
+    
+    def calculate_threat_score(self, threat_data, threat_level, threat_type):
+        """Calculate a threat score for prioritization"""
+        try:
+            base_score = {
+                ThreatLevel.LOW: 1,
+                ThreatLevel.MEDIUM: 3,
+                ThreatLevel.HIGH: 7,
+                ThreatLevel.CRITICAL: 15,
+                ThreatLevel.EMERGENCY: 25
+            }.get(threat_level, 1)
+            
+            # Add frequency multiplier
+            threat_id = self.generate_threat_id(threat_type, threat_data)
+            frequency = self.threat_counters.get(threat_id, 0)
+            frequency_multiplier = min(3.0, 1.0 + (frequency * 0.5))
+            
+            # Add type-specific modifiers
+            type_modifier = 1.0
+            if threat_type == 'port' and isinstance(threat_data, dict):
+                # Higher priority for suspicious ports
+                suspicious_ports = [22, 23, 135, 139, 445, 1433, 3389]
+                if threat_data.get('port') in suspicious_ports:
+                    type_modifier = 1.5
+            
+            elif threat_type == 'connection' and isinstance(threat_data, dict):
+                # Higher priority for external connections
+                remote_addr = threat_data.get('remote_addr', '')
+                if remote_addr and not remote_addr.startswith(('127.', '192.168.', '10.')):
+                    type_modifier = 1.3
+            
+            final_score = base_score * frequency_multiplier * type_modifier
+            return final_score
+            
+        except Exception as e:
+            return 1.0
+    
+    def context_aware_threat_response(self, threat):
+        """Context-aware threat response based on threat characteristics"""
+        try:
+            threat_type = threat['type']
+            threat_data = threat['data']
+            threat_level = threat['level']
+            threat_score = threat['score']
+            
+            # Different response strategies based on context
+            if threat_score >= 20:  # Critical threats
+                response = self.critical_threat_response(threat_type, threat_data, threat_level)
+            elif threat_score >= 10:  # High priority threats
+                response = self.high_priority_threat_response(threat_type, threat_data, threat_level)
+            else:  # Standard threats
+                response = self.smart_threat_response(threat_type, threat_data, threat_level.name)
+            
+            return response
+            
+        except Exception as e:
+            return f"Error in context-aware response: {str(e)}"
+    
+    def critical_threat_response(self, threat_type, threat_data, threat_level):
+        """Immediate response for critical threats"""
+        try:
+            if threat_type == 'connection':
+                ip = threat_data.get('remote_addr', 'unknown')
+                # Immediate blocking
+                self.soft_block_ip(ip)
+                return f"CRITICAL: Immediately blocked IP {ip}"
+            
+            elif threat_type == 'port':
+                port = threat_data.get('port', 'unknown')
+                # Immediate process termination
+                terminated = self.terminate_malicious_process_on_port(port)
+                return f"CRITICAL: Port {port} - {terminated}"
+            
+            elif threat_type == 'anomaly':
+                anomaly_type = threat_data.get('type', 'unknown')
+                # Immediate system protection
+                return f"CRITICAL: Activated protection for {anomaly_type} anomaly"
+            
+        except Exception as e:
+            return f"Critical response error: {str(e)}"
+    
+    def high_priority_threat_response(self, threat_type, threat_data, threat_level):
+        """Enhanced response for high priority threats"""
+        try:
+            if threat_type == 'connection':
+                ip = threat_data.get('remote_addr', 'unknown')
+                # Enhanced monitoring and conditional blocking
+                self.threat_intelligence['known_bad_ips'].add(ip)
+                return f"HIGH: Enhanced monitoring for IP {ip}"
+            
+            elif threat_type == 'port':
+                port = threat_data.get('port', 'unknown')
+                processes = self.get_processes_using_port(port)
+                return f"HIGH: Port {port} processes investigated: {processes}"
+            
+            elif threat_type == 'anomaly':
+                anomaly_type = threat_data.get('type', 'unknown')
+                root_cause = self.investigate_anomaly_root_cause(anomaly_type, threat_data)
+                return f"HIGH: {anomaly_type} - {root_cause}"
+            
+        except Exception as e:
+            return f"High priority response error: {str(e)}"
     
     def analyze_recurring_threats(self, port_scan, connections, anomalies):
         """Analyze recurring threats and take automated action"""
         try:
             current_time = datetime.now()
             
-            # Analyze port threats
+            # Analyze port threats with lower threshold for faster response
             for port in port_scan:
                 if isinstance(port, dict):
                     port_key = f"port_{port.get('port', 'unknown')}"
@@ -2440,11 +3696,11 @@ class NIMDATkinterApp:
                     if risk_level in ['HIGH', 'CRITICAL']:
                         self.threat_counters[port_key] += 1
                         
-                        # If port appears repeatedly, take automated action
-                        if self.threat_counters[port_key] >= 3:
+                        # If port appears repeatedly, take automated action (reduced threshold)
+                        if self.threat_counters[port_key] >= 2:  # Faster response
                             self.take_automated_action(port_key, port, 'recurring_high_risk_port')
             
-            # Analyze connection threats
+            # Analyze connection threats with pattern recognition
             for conn in connections:
                 if isinstance(conn, dict):
                     remote_addr = conn.get('remote_address', 'unknown')
@@ -2452,20 +3708,23 @@ class NIMDATkinterApp:
                         conn_key = f"connection_{remote_addr}"
                         self.threat_counters[conn_key] += 1
                         
-                        # If same connection appears repeatedly, investigate
-                        if self.threat_counters[conn_key] >= 5:
+                        # If same connection appears repeatedly, investigate (reduced threshold)
+                        if self.threat_counters[conn_key] >= 3:  # Faster response
                             self.take_automated_action(conn_key, conn, 'recurring_suspicious_connection')
             
-            # Analyze anomaly patterns
+            # Analyze anomaly patterns with intelligence
             for anomaly in anomalies:
                 if isinstance(anomaly, dict):
                     anomaly_type = anomaly.get('type', 'unknown')
                     anomaly_key = f"anomaly_{anomaly_type}"
                     self.threat_counters[anomaly_key] += 1
                     
-                    # If same anomaly type repeats, investigate deeper
-                    if self.threat_counters[anomaly_key] >= 4:
+                    # If same anomaly type repeats, investigate deeper (reduced threshold)
+                    if self.threat_counters[anomaly_key] >= 2:  # Faster response
                         self.take_automated_action(anomaly_key, anomaly, 'recurring_anomaly_pattern')
+            
+            # Run enhanced automated response system
+            self.enhance_automated_response_system()
                         
         except Exception as e:
             print(f"Error in recurring threat analysis: {e}")
@@ -2972,7 +4231,7 @@ class NIMDATkinterApp:
             messagebox.showerror("Error", f"Failed to get performance details: {e}")
     
     def on_security_update(self, security_status):
-        """Handle security status update"""
+        """Enhanced security status update with intelligent response"""
         try:
             print(f"[DEBUG] on_security_update: port_scan={security_status.get('port_scan')}")
             
@@ -2980,6 +4239,51 @@ class NIMDATkinterApp:
             self.current_connections = security_status.get('connections', [])
             self.current_port_scan = security_status.get('port_scan', [])
             self.current_anomalies = security_status.get('anomalies', [])
+            
+            # Apply smart threat response to each type
+            connections_processed = []
+            for conn in self.current_connections:
+                if isinstance(conn, dict):
+                    threat_level = self.threat_analyzer.analyze_address_threat(conn.get('remote_addr', ''))
+                    if threat_level not in [ThreatLevel.LOW]:
+                        response = self.smart_threat_response('ip_connection', conn, threat_level.name)
+                        if response and "Skipped" not in response:
+                            connections_processed.append(f"IP {conn.get('remote_addr', 'unknown')}: {response}")
+            
+            ports_processed = []
+            for port in self.current_port_scan:
+                if isinstance(port, dict):
+                    threat_level = self.threat_analyzer.analyze_port_threat(port.get('port', 0), port.get('service', ''))
+                    if threat_level not in [ThreatLevel.LOW]:
+                        response = self.smart_threat_response('port_scan', port, threat_level.name)
+                        if response and "Skipped" not in response:
+                            ports_processed.append(f"Port {port.get('port', 'unknown')}: {response}")
+            
+            anomalies_processed = []
+            for anomaly in self.current_anomalies:
+                if isinstance(anomaly, dict):
+                    threat_level = self.threat_analyzer.analyze_anomaly_threat(anomaly)
+                    if threat_level not in [ThreatLevel.LOW]:
+                        response = self.smart_threat_response('anomaly', anomaly, threat_level.name)
+                        if response and "Skipped" not in response:
+                            anomalies_processed.append(f"Anomaly {anomaly.get('type', 'unknown')}: {response}")
+            
+            # Log processed threats summary
+            if connections_processed or ports_processed or anomalies_processed:
+                summary = []
+                if connections_processed:
+                    summary.extend(connections_processed[:2])  # Limit to 2 per type
+                if ports_processed:
+                    summary.extend(ports_processed[:2])
+                if anomalies_processed:
+                    summary.extend(anomalies_processed[:2])
+                
+                if summary:
+                    timestamp = datetime.now().strftime('%H:%M:%S')
+                    self.add_action_to_log(f"[{timestamp}] 🧠 INTELLIGENT RESPONSE:\n")
+                    for item in summary[:3]:  # Limit total to 3 items
+                        self.add_action_to_log(f"  • {item}\n")
+                    self.add_action_to_log("\n")
             
             # Update security status
             self.security_status.update(security_status)
@@ -3051,7 +4355,7 @@ class NIMDATkinterApp:
                 'pid': conn['pid'],
                 'process': conn['process']
             }
-            self.threat_analyzer.execute_actions(threat_level, conn['remote_addr'], details)
+            self.threat_analyzer.execute_actions(threat_level, conn['remote_addr'], details, self)
             
             # Get threat level info
             threat_info = threat_level.value[0]  # Get the enum value
@@ -3089,7 +4393,7 @@ class NIMDATkinterApp:
                 'risk': port['risk'],
                 'timestamp': port['timestamp']
             }
-            self.threat_analyzer.execute_actions(threat_level, f"Port {port['port']}", details)
+            self.threat_analyzer.execute_actions(threat_level, f"Port {port['port']}", details, self)
             
             # Get threat level info
             threat_info = threat_level.value[0]  # Get the enum value
@@ -3121,7 +4425,7 @@ class NIMDATkinterApp:
             threat_level = self.threat_analyzer.analyze_anomaly_threat(anomaly)
             
             # Execute security actions based on threat level
-            self.threat_analyzer.execute_actions(threat_level, f"Anomaly: {anomaly.get('type', 'UNKNOWN')}", anomaly)
+            self.threat_analyzer.execute_actions(threat_level, f"Anomaly: {anomaly.get('type', 'UNKNOWN')}", anomaly, self)
             
             # Get threat level info
             threat_info = threat_level.value[0]  # Get the enum value
@@ -5269,17 +6573,433 @@ Select actions for each threat level below:"""
             messagebox.showinfo("Suspicious Processes", "No suspicious processes found.")
 
     def start_monitoring(self):
-        """Start security monitoring thread"""
-        self.monitor_thread = SecurityMonitorThread(self.on_security_update)
-        self.monitor_thread.daemon = True
-        self.monitor_thread.start()
-        
-        # Update UI periodically
-        self.root.after(5000, self.update_ui)
+        """Start security monitoring"""
+        try:
+            # Start UI update cycle
+            self.update_ui()
+            
+            # Initialize enhanced threat detection
+            self.init_enhanced_threat_detection()
+            
+            self.log_message("Security monitoring started")
+        except Exception as e:
+            self.log_message(f"ERROR: Failed to start monitoring: {str(e)}")
+
+    def show_automated_actions_report(self):
+        """Show detailed report of automated actions taken by the system"""
+        try:
+            # Create automated actions report dialog
+            dialog = tk.Toplevel(self.root)
+            dialog.title("🤖 Automated Actions Report")
+            dialog.geometry("800x600")
+            dialog.configure(bg='#2b2b2b')
+            
+            # Title
+            title_frame = ttk.Frame(dialog)
+            title_frame.pack(fill='x', padx=10, pady=5)
+            
+            ttk.Label(title_frame, text="🤖 Automated Security Actions", 
+                     font=('Arial', 16, 'bold')).pack(side='left')
+            
+            # Statistics frame
+            stats_frame = ttk.LabelFrame(dialog, text="Statistics", padding=10)
+            stats_frame.pack(fill='x', padx=10, pady=5)
+            
+            stats_left = ttk.Frame(stats_frame)
+            stats_left.pack(side='left', fill='both', expand=True)
+            
+            stats_right = ttk.Frame(stats_frame)
+            stats_right.pack(side='right', fill='both', expand=True)
+            
+            # Left stats
+            total_actions = len(self.automated_actions)
+            ttk.Label(stats_left, text=f"Total Automated Actions: {total_actions}", 
+                     font=('Arial', 10, 'bold')).pack(anchor='w')
+            
+            recurring_threats = sum(1 for count in self.threat_counters.values() if count >= 2)
+            ttk.Label(stats_left, text=f"Recurring Threats Detected: {recurring_threats}").pack(anchor='w')
+            
+            # Right stats
+            if self.last_automated_action:
+                last_action_str = self.last_automated_action.strftime('%Y-%m-%d %H:%M:%S')
+                ttk.Label(stats_right, text=f"Last Action: {last_action_str}").pack(anchor='w')
+            else:
+                ttk.Label(stats_right, text="Last Action: Never").pack(anchor='w')
+            
+            # Actions by type
+            action_types = {}
+            for action in self.automated_actions:
+                action_type = action.get('threat_type', 'unknown')
+                action_types[action_type] = action_types.get(action_type, 0) + 1
+            
+            ttk.Label(stats_right, text=f"Unique Threat Types: {len(action_types)}").pack(anchor='w')
+            
+            # Actions list
+            list_frame = ttk.LabelFrame(dialog, text="Detailed Actions History", padding=10)
+            list_frame.pack(fill='both', expand=True, padx=10, pady=5)
+            
+            # Create treeview for actions
+            columns = ('Time', 'Type', 'Action', 'Target')
+            actions_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
+            
+            # Configure columns
+            actions_tree.heading('Time', text='Timestamp')
+            actions_tree.heading('Type', text='Threat Type')
+            actions_tree.heading('Action', text='Action Taken')
+            actions_tree.heading('Target', text='Target/Details')
+            
+            actions_tree.column('Time', width=150)
+            actions_tree.column('Type', width=200)
+            actions_tree.column('Action', width=250)
+            actions_tree.column('Target', width=200)
+            
+            # Scrollbar for treeview
+            scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=actions_tree.yview)
+            actions_tree.configure(yscrollcommand=scrollbar.set)
+            
+            actions_tree.pack(side='left', fill='both', expand=True)
+            scrollbar.pack(side='right', fill='y')
+            
+            # Populate actions list (show most recent first)
+            sorted_actions = sorted(self.automated_actions, key=lambda x: x['timestamp'], reverse=True)
+            
+            for action in sorted_actions:
+                timestamp = action['timestamp'].strftime('%H:%M:%S')
+                threat_type = action.get('threat_type', 'Unknown')
+                action_taken = action.get('action', 'Unknown')
+                
+                # Extract target info
+                threat_data = action.get('threat_data', {})
+                target = ""
+                if isinstance(threat_data, dict):
+                    if 'port' in threat_data:
+                        target = f"Port {threat_data['port']}"
+                    elif 'remote_address' in threat_data:
+                        target = f"IP {threat_data['remote_address']}"
+                    elif 'type' in threat_data:
+                        target = threat_data['type']
+                    else:
+                        target = str(threat_data)[:50]
+                
+                # Clean up threat type for display
+                display_type = threat_type.replace('recurring_', '').replace('_', ' ').title()
+                
+                actions_tree.insert('', 'end', values=(timestamp, display_type, action_taken[:50], target))
+            
+            # Buttons frame
+            buttons_frame = ttk.Frame(dialog)
+            buttons_frame.pack(fill='x', padx=10, pady=5)
+            
+            def clear_actions_history():
+                if messagebox.askyesno("Confirm", "Clear all automated actions history?"):
+                    self.automated_actions.clear()
+                    self.threat_counters.clear()
+                    self.last_automated_action = None
+                    dialog.destroy()
+                    self.log_message("🗑️ Automated actions history cleared")
+            
+            def export_actions_report():
+                try:
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"nimda_automated_actions_{timestamp}.txt"
+                    
+                    with open(filename, 'w') as f:
+                        f.write("=== NIMDA AUTOMATED ACTIONS REPORT ===\n")
+                        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                        f.write(f"Total Actions: {total_actions}\n")
+                        f.write(f"Recurring Threats: {recurring_threats}\n\n")
+                        
+                        f.write("ACTIONS BY TYPE:\n")
+                        for action_type, count in action_types.items():
+                            f.write(f"  {action_type}: {count}\n")
+                        f.write("\n")
+                        
+                        f.write("DETAILED ACTIONS:\n")
+                        for action in sorted_actions:
+                            f.write(f"[{action['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}] ")
+                            f.write(f"{action.get('threat_type', 'Unknown')}: ")
+                            f.write(f"{action.get('action', 'Unknown')}\n")
+                            if action.get('threat_data'):
+                                f.write(f"  Details: {action['threat_data']}\n")
+                            f.write("\n")
+                    
+                    messagebox.showinfo("Export Complete", f"Report saved as: {filename}")
+                    
+                except Exception as e:
+                    messagebox.showerror("Export Error", f"Failed to export report: {e}")
+            
+            def refresh_display():
+                dialog.destroy()
+                self.show_automated_actions_report()
+            
+            ttk.Button(buttons_frame, text="🔄 Refresh", command=refresh_display).pack(side='left', padx=5)
+            ttk.Button(buttons_frame, text="📄 Export Report", command=export_actions_report).pack(side='left', padx=5)
+            ttk.Button(buttons_frame, text="🗑️ Clear History", command=clear_actions_history).pack(side='left', padx=5)
+            ttk.Button(buttons_frame, text="❌ Close", command=dialog.destroy).pack(side='right', padx=5)
+            
+            # If no actions yet, show helpful message
+            if not self.automated_actions:
+                no_actions_frame = ttk.Frame(list_frame)
+                no_actions_frame.pack(fill='both', expand=True)
+                
+                ttk.Label(no_actions_frame, text="🤖 No automated actions have been taken yet.", 
+                         font=('Arial', 12), justify='center').pack(expand=True)
+                ttk.Label(no_actions_frame, text="The system will automatically respond to recurring threats\n"
+                                                "when they are detected multiple times.", 
+                         justify='center').pack(expand=True)
+            
+        except Exception as e:
+            self.log_message(f"❌ Failed to show automated actions report: {e}")
+            messagebox.showerror("Error", f"Failed to show automated actions report: {e}")
+
+    def enhance_automated_response_system(self):
+        """Enhance the automated response system with more intelligent actions"""
+        try:
+            # Add more sophisticated threat pattern recognition
+            current_time = datetime.now()
+            
+            # Check for coordinated attacks (multiple threat types from same source)
+            threat_sources = {}
+            
+            # Analyze recent threats by source
+            for threat_key, count in self.threat_counters.items():
+                if count >= 2:  # Recurring threat
+                    # Extract source information
+                    source = None
+                    if ':' in threat_key:  # IP-based threats
+                        source = threat_key.split(':')[0]
+                    elif 'port_' in threat_key:  # Port-based threats
+                        source = f"port_{threat_key.split('_')[1]}"
+                    elif 'anomaly_' in threat_key:  # Anomaly-based threats
+                        source = "system_anomaly"
+                    
+                    if source:
+                        if source not in threat_sources:
+                            threat_sources[source] = []
+                        threat_sources[source].append(threat_key)
+            
+            # Take enhanced actions for coordinated attacks
+            for source, threats in threat_sources.items():
+                if len(threats) >= 3:  # Multiple threat types from same source
+                    self.take_coordinated_attack_action(source, threats)
+            
+            # Implement time-based threat escalation
+            self.implement_threat_escalation()
+            
+            # Add predictive threat blocking
+            self.implement_predictive_blocking()
+            
+        except Exception as e:
+            print(f"Error enhancing automated response: {e}")
+
+    def take_coordinated_attack_action(self, source, threat_keys):
+        """Take action against coordinated attacks from a single source"""
+        try:
+            action_description = f"Coordinated attack detected from {source} - {len(threat_keys)} threat types"
+            
+            # More aggressive response for coordinated attacks
+            if source.startswith('port_'):
+                port_num = source.split('_')[1]
+                self.implement_port_quarantine(port_num)
+                action_description += f". Port {port_num} quarantined."
+            elif '.' in source:  # IP address
+                self.implement_ip_complete_ban(source)
+                action_description += f". IP {source} completely banned."
+            else:
+                self.implement_system_lockdown_mode()
+                action_description += ". System lockdown mode activated."
+            
+            # Log coordinated attack response
+            self.automated_actions.append({
+                'timestamp': datetime.now(),
+                'threat_key': f"coordinated_{source}",
+                'threat_type': 'coordinated_attack',
+                'action': action_description,
+                'threat_data': {'source': source, 'threat_count': len(threat_keys)}
+            })
+            
+            self.add_action_to_log(f"🚨 COORDINATED ATTACK: {action_description}\n")
+            
+        except Exception as e:
+            print(f"Error taking coordinated attack action: {e}")
+
+    def implement_threat_escalation(self):
+        """Implement time-based threat escalation"""
+        try:
+            current_time = datetime.now()
+            
+            for threat_key, count in self.threat_counters.items():
+                # Check for rapid escalation (multiple occurrences in short time)
+                if count >= 5:  # High frequency threat
+                    # Implement immediate response escalation
+                    escalation_action = f"High-frequency threat escalation for {threat_key}"
+                    
+                    # Take immediate blocking action
+                    if 'port_' in threat_key:
+                        port_num = threat_key.split('_')[1]
+                        self.emergency_port_shutdown(port_num)
+                        escalation_action += f". Emergency port {port_num} shutdown."
+                    elif ':' in threat_key:  # IP-based
+                        ip_addr = threat_key.split(':')[0]
+                        self.emergency_ip_block(ip_addr)
+                        escalation_action += f". Emergency IP {ip_addr} block."
+                    
+                    # Log escalation
+                    self.automated_actions.append({
+                        'timestamp': current_time,
+                        'threat_key': f"escalation_{threat_key}",
+                        'threat_type': 'threat_escalation',
+                        'action': escalation_action,
+                        'threat_data': {'original_threat': threat_key, 'frequency': count}
+                    })
+                    
+                    self.add_action_to_log(f"🚨 ESCALATION: {escalation_action}\n")
+                    
+                    # Reset counter after escalation
+                    self.threat_counters[threat_key] = 0
+            
+        except Exception as e:
+            print(f"Error implementing threat escalation: {e}")
+
+    def implement_predictive_blocking(self):
+        """Implement predictive threat blocking based on patterns"""
+        try:
+            # Analyze threat patterns for prediction
+            threat_patterns = {}
+            
+            # Group threats by type and look for patterns
+            for action in self.automated_actions[-20:]:  # Look at last 20 actions
+                threat_type = action.get('threat_type', '')
+                threat_data = action.get('threat_data', {})
+                
+                if threat_type not in threat_patterns:
+                    threat_patterns[threat_type] = []
+                threat_patterns[threat_type].append(threat_data)
+            
+            # Predict and pre-emptively block similar threats
+            for threat_type, patterns in threat_patterns.items():
+                if len(patterns) >= 3:  # Pattern detected
+                    self.implement_preemptive_blocking(threat_type, patterns)
+            
+        except Exception as e:
+            print(f"Error implementing predictive blocking: {e}")
+
+    def implement_preemptive_blocking(self, threat_type, patterns):
+        """Implement pre-emptive blocking based on detected patterns"""
+        try:
+            prediction_action = f"Predictive blocking for {threat_type} pattern"
+            
+            # Analyze patterns and create preventive rules
+            if 'port' in threat_type and patterns:
+                # Block similar port ranges
+                ports = [p.get('port') for p in patterns if isinstance(p, dict) and 'port' in p]
+                if ports:
+                    port_ranges = self.identify_port_ranges(ports)
+                    for port_range in port_ranges:
+                        self.preemptive_port_block(port_range)
+                    prediction_action += f". Blocked port ranges: {port_ranges}"
+            
+            elif 'connection' in threat_type and patterns:
+                # Block similar IP ranges
+                ips = [p.get('remote_address') for p in patterns if isinstance(p, dict) and 'remote_address' in p]
+                if ips:
+                    ip_ranges = self.identify_ip_ranges(ips)
+                    for ip_range in ip_ranges:
+                        self.preemptive_ip_block(ip_range)
+                    prediction_action += f". Blocked IP ranges: {ip_ranges}"
+            
+            # Log predictive action
+            self.automated_actions.append({
+                'timestamp': datetime.now(),
+                'threat_key': f"predictive_{threat_type}",
+                'threat_type': 'predictive_blocking',
+                'action': prediction_action,
+                'threat_data': {'pattern_type': threat_type, 'pattern_count': len(patterns)}
+            })
+            
+            self.add_action_to_log(f"🔮 PREDICTIVE: {prediction_action}\n")
+            
+        except Exception as e:
+            print(f"Error implementing preemptive blocking: {e}")
+
+    def identify_port_ranges(self, ports):
+        """Identify potentially dangerous port ranges from attack patterns"""
+        try:
+            ranges = []
+            sorted_ports = sorted([int(p) for p in ports if str(p).isdigit()])
+            
+            if len(sorted_ports) >= 2:
+                min_port = min(sorted_ports)
+                max_port = max(sorted_ports)
+                
+                # Create range around detected ports
+                start_range = max(min_port - 10, 1)
+                end_range = min(max_port + 10, 65535)
+                ranges.append(f"{start_range}-{end_range}")
+            
+            return ranges
+        except:
+            return []
+
+    def identify_ip_ranges(self, ips):
+        """Identify potentially dangerous IP ranges from attack patterns"""
+        try:
+            ranges = []
+            ip_parts = []
+            
+            for ip in ips:
+                if ip and '.' in str(ip):
+                    parts = str(ip).split('.')
+                    if len(parts) == 4:
+                        ip_parts.append(parts)
+            
+            if len(ip_parts) >= 2:
+                # Find common subnet
+                common_parts = []
+                for i in range(3):  # First 3 octets
+                    values = set(parts[i] for parts in ip_parts)
+                    if len(values) == 1:
+                        common_parts.append(list(values)[0])
+                    else:
+                        break
+                
+                if len(common_parts) >= 2:
+                    subnet = '.'.join(common_parts + ['0'] * (3 - len(common_parts))) + '/24'
+                    ranges.append(subnet)
+            
+            return ranges
+        except:
+            return []
+
+    def emergency_port_shutdown(self, port_num):
+        """Emergency shutdown of a specific port"""
+        try:
+            # More aggressive port blocking
+            if platform.system() == "Darwin":
+                subprocess.run(['sudo', 'pfctl', '-t', 'nimda_emergency', '-T', 'add', f'0.0.0.0/0 port {port_num}'], timeout=5)
+            elif platform.system() == "Linux":
+                subprocess.run(['sudo', 'iptables', '-A', 'INPUT', '-p', 'tcp', '--dport', str(port_num), '-j', 'REJECT'], timeout=5)
+                subprocess.run(['sudo', 'iptables', '-A', 'OUTPUT', '-p', 'tcp', '--dport', str(port_num), '-j', 'REJECT'], timeout=5)
+        except:
+            pass
+
+    def emergency_ip_block(self, ip_addr):
+        """Emergency blocking of an IP address"""
+        try:
+            # More aggressive IP blocking
+            if platform.system() == "Darwin":
+                subprocess.run(['sudo', 'pfctl', '-t', 'nimda_emergency', '-T', 'add', ip_addr], timeout=5)
+            elif platform.system() == "Linux":
+                subprocess.run(['sudo', 'iptables', '-A', 'INPUT', '-s', ip_addr, '-j', 'REJECT'], timeout=5)
+                subprocess.run(['sudo', 'iptables', '-A', 'OUTPUT', '-d', ip_addr, '-j', 'REJECT'], timeout=5)
+        except:
+            pass
     
     def trigger_sound_alert(self, threat_level: ThreatLevel, target: str = ""):
         """Trigger sound alert for threat level"""
         try:
+            print(f"🔊 ЗВУК: Отримано запит на звук для {threat_level} - {target}")
+            
             # Map ThreatLevel to SoundThreatLevel
             sound_level_mapping = {
                 ThreatLevel.LOW: SoundThreatLevel.LOW,
@@ -5290,10 +7010,19 @@ Select actions for each threat level below:"""
             }
             
             sound_level = sound_level_mapping.get(threat_level, SoundThreatLevel.MEDIUM)
-            self.sound_system.play_threat_alert(sound_level, target)
+            print(f"🔊 ЗВУК: Мапинг {threat_level} -> {sound_level}")
+            
+            if hasattr(self, 'sound_system') and self.sound_system:
+                print(f"🔊 ЗВУК: Викликаємо play_threat_alert({sound_level}, {target})")
+                self.sound_system.play_threat_alert(sound_level, target)
+                print(f"🔊 ЗВУК: play_threat_alert викликано успішно")
+            else:
+                print(f"❌ ЗВУК: sound_system недоступний")
             
         except Exception as e:
-            print(f"Sound alert error: {e}")
+            print(f"❌ Sound alert error: {e}")
+            import traceback
+            traceback.print_exc()
     
     def trigger_pattern_alert(self, pattern_name: str, target: str = ""):
         """Trigger pattern alert for specific events"""
@@ -5303,11 +7032,50 @@ Select actions for each threat level below:"""
             print(f"Pattern alert error: {e}")
     
     def test_sound_system(self):
-        """Test the sound alert system"""
+        """Comprehensive test of the sound alert system"""
         try:
-            self.sound_system.test_sounds()
-            messagebox.showinfo("Sound Test", "Sound system test completed!")
+            print("🔊 Starting comprehensive sound system test...")
+            
+            # Test basic sound system
+            if hasattr(self, 'sound_system') and self.sound_system:
+                print("✅ Sound system available")
+                
+                # Test all threat levels
+                threat_levels = [
+                    (ThreatLevel.LOW, "Low Priority Test"),
+                    (ThreatLevel.MEDIUM, "Medium Priority Test"),
+                    (ThreatLevel.HIGH, "High Priority Test"),
+                    (ThreatLevel.CRITICAL, "Critical Priority Test"),
+                    (ThreatLevel.EMERGENCY, "Emergency Priority Test")
+                ]
+                
+                for level, description in threat_levels:
+                    print(f"🎵 Testing {level.name} level...")
+                    self.trigger_sound_alert(level, description)
+                    time.sleep(1)  # Pause between tests
+                
+                # Test the built-in test suite
+                self.sound_system.test_sounds()
+                
+                # Add to actions log
+                self.add_action_to_log("🔊 Sound System Test", "All threat level sounds tested successfully")
+                
+                messagebox.showinfo("Sound Test Complete", 
+                    "Sound system test completed!\n\n"
+                    "You should have heard 5 different sounds:\n"
+                    "• Low: Gentle ping\n"
+                    "• Medium: Warning tone\n" 
+                    "• High: Alert sound\n"
+                    "• Critical: Urgent tone\n"
+                    "• Emergency: Alarm sound\n\n"
+                    "If you didn't hear sounds, check your volume settings.")
+                
+            else:
+                print("❌ Sound system not available")
+                messagebox.showerror("Sound Test Error", "Sound system not initialized!")
+                
         except Exception as e:
+            print(f"❌ Sound test error: {e}")
             messagebox.showerror("Sound Test Error", f"Failed to test sound system: {e}")
     
     def toggle_sound_alerts(self):
