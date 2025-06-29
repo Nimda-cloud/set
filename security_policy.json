@@ -34,6 +34,7 @@
     "backup",
     "ai_analysis",
     "trace_attack",
-    "alert"
+    "alert",
+    "clean_temp"
   ]
 }

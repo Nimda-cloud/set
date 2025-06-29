@@ -69,7 +69,6 @@ class SecurityAction(Enum):
     QUARANTINE = "quarantine"
     REMOVE_MALWARE = "remove_malware"
     ANALYZE_ECOSYSTEM = "analyze_ecosystem"
-    CLEAN_TEMP = "clean_temp"
 
 class SecurityPolicy:
     """Security policy configuration"""
@@ -80,7 +79,7 @@ class SecurityPolicy:
             ThreatLevel.MEDIUM: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.DETECT_TROJAN],
             ThreatLevel.HIGH: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.BLOCK, SecurityAction.ALERT, SecurityAction.DETECT_TROJAN, SecurityAction.DEEP_ANALYSIS],
             ThreatLevel.CRITICAL: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.BLOCK, SecurityAction.ISOLATE, SecurityAction.AI_ANALYSIS, SecurityAction.ALERT, SecurityAction.DETECT_TROJAN, SecurityAction.ISOLATE_FILE, SecurityAction.ANALYZE_ECOSYSTEM],
-            ThreatLevel.EMERGENCY: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.BLOCK, SecurityAction.ISOLATE, SecurityAction.TERMINATE, SecurityAction.BACKUP, SecurityAction.AI_ANALYSIS, SecurityAction.TRACE_ATTACK, SecurityAction.ALERT, SecurityAction.DETECT_TROJAN, SecurityAction.ISOLATE_FILE, SecurityAction.DEEP_ANALYSIS, SecurityAction.QUARANTINE, SecurityAction.REMOVE_MALWARE, SecurityAction.ANALYZE_ECOSYSTEM, SecurityAction.CLEAN_TEMP]
+            ThreatLevel.EMERGENCY: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.BLOCK, SecurityAction.ISOLATE, SecurityAction.TERMINATE, SecurityAction.BACKUP, SecurityAction.AI_ANALYSIS, SecurityAction.TRACE_ATTACK, SecurityAction.ALERT, SecurityAction.DETECT_TROJAN, SecurityAction.ISOLATE_FILE, SecurityAction.DEEP_ANALYSIS, SecurityAction.QUARANTINE, SecurityAction.REMOVE_MALWARE, SecurityAction.ANALYZE_ECOSYSTEM]
         }
         self.load_policy()
     
@@ -218,8 +217,6 @@ class ThreatAnalyzer:
                     self._action_ai_analysis(target, details, threat_level)
                 elif action == SecurityAction.TRACE_ATTACK:
                     self._action_trace_attack(target, details)
-                elif action == SecurityAction.CLEAN_TEMP:
-                    self._action_clean_temp(target, details)
             except Exception as e:
                 print(f"Failed to execute action {action.value}: {e}")
     
@@ -321,58 +318,6 @@ class ThreatAnalyzer:
             return False, "Command timed out"
         except Exception as e:
             return False, str(e)
-    
-    def _action_clean_temp(self, target: str, details: Dict):
-        """Clean temporary files"""
-        print(f"🧹 Cleaning temporary files for: {target}")
-        try:
-            import shutil
-            import glob
-            import os
-            
-            removed = []
-            errors = []
-            
-            # Списки директорій та масок файлів
-            temp_dirs = [
-                '/tmp/nimda_quarantine',
-                '/tmp/nimda_analysis',
-                os.path.expanduser('~/NIMDA_Emergency_Backup'),
-            ]
-            temp_files = [
-                'isolation_log.json',
-                'deep_analysis_*.json',
-                '*.log',
-                '*.tmp',
-                '*.cache',
-            ]
-            
-            # Видалення директорій
-            for d in temp_dirs:
-                if os.path.exists(d):
-                    try:
-                        shutil.rmtree(d)
-                        removed.append(d)
-                    except Exception as e:
-                        errors.append(f"{d}: {e}")
-            
-            # Видалення файлів по масках
-            for pattern in temp_files:
-                for f in glob.glob(pattern):
-                    try:
-                        os.remove(f)
-                        removed.append(f)
-                    except Exception as e:
-                        errors.append(f"{f}: {e}")
-            
-            msg = f"🧹 Cleaned: {', '.join(removed) if removed else 'nothing found'}"
-            if errors:
-                msg += f"\nErrors: {', '.join(errors)}"
-            
-            print(msg)
-            
-        except Exception as e:
-            print(f"❌ Clean temp action failed: {e}")
 
 class TranslationManager:
     """Translation manager for Ukrainian language"""
@@ -1347,7 +1292,7 @@ class NIMDATkinterApp:
         self.devices_tree = None
         self.processes_tree = None
         
-        # Data storage with threat tracking
+        # Data storage
         self.security_status = {
             'threat_level': ThreatLevel.LOW,
             'connections': [],
@@ -1355,13 +1300,6 @@ class NIMDATkinterApp:
             'anomalies': [],
             'last_update': datetime.now()
         }
-        
-        # Enhanced threat tracking for automated response
-        self.threat_history = {}  # Track recurring threats
-        self.threat_counters = defaultdict(int)  # Count threat occurrences
-        self.automated_actions = []  # Log of automated actions taken
-        self.threat_patterns = {}  # Pattern analysis for threats
-        self.last_automated_action = None  # Track last automated action time
         
         # Threading
         self.monitor_thread = None
@@ -1627,37 +1565,25 @@ class NIMDATkinterApp:
         dashboard_frame = ttk.Frame(self.notebook)
         self.notebook.add(dashboard_frame, text="📊 Dashboard")
         
-        # Main dashboard container that fills the entire tab
-        main_dashboard_frame = ttk.Frame(dashboard_frame)
-        main_dashboard_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        # Main container with scrollbar
+        main_canvas = tk.Canvas(dashboard_frame, bg='#2b2b2b')
+        scrollbar = ttk.Scrollbar(dashboard_frame, orient="vertical", command=main_canvas.yview)
+        scrollable_frame = ttk.Frame(main_canvas)
         
-        # Create a two-column layout with left column taking more space
-        left_column = ttk.Frame(main_dashboard_frame)
-        left_column.pack(side='left', fill='both', expand=True, padx=(0, 5))
-        
-        # Add scrollbar for left column if needed
-        left_canvas = tk.Canvas(left_column, bg='#2b2b2b')
-        left_scrollbar = ttk.Scrollbar(left_column, orient="vertical", command=left_canvas.yview)
-        left_scrollable_frame = ttk.Frame(left_canvas)
-        
-        left_scrollable_frame.bind(
+        scrollable_frame.bind(
             "<Configure>",
-            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
         )
         
-        left_canvas.create_window((0, 0), window=left_scrollable_frame, anchor="nw")
-        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        main_canvas.configure(yscrollcommand=scrollbar.set)
         
-        left_canvas.pack(side="left", fill="both", expand=True)
-        left_scrollbar.pack(side="right", fill="y")
-        
-        # Right column with fixed width (narrower)
-        right_column = ttk.Frame(main_dashboard_frame, width=300)  
-        right_column.pack(side='right', fill='y', padx=(5, 0))
-        right_column.pack_propagate(False)  # Prevent resizing based on content
+        # Pack scrollable elements
+        main_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         
         # ===== SYSTEM METRICS SECTION =====
-        metrics_frame = ttk.LabelFrame(left_scrollable_frame, text="🖥️ System Metrics", padding=15)
+        metrics_frame = ttk.LabelFrame(scrollable_frame, text="🖥️ System Metrics", padding=15)
         metrics_frame.pack(fill='x', padx=10, pady=5)
         
         # CPU and Memory with detailed info
@@ -1701,7 +1627,7 @@ class NIMDATkinterApp:
         self.mem_details_label.pack(side='left')
         
         # ===== SECURITY STATUS SECTION =====
-        security_frame = ttk.LabelFrame(left_scrollable_frame, text="🛡️ Security Status", padding=15)
+        security_frame = ttk.LabelFrame(scrollable_frame, text="🛡️ Security Status", padding=15)
         security_frame.pack(fill='x', padx=10, pady=5)
         
         # Threat Level Display
@@ -1737,18 +1663,8 @@ class NIMDATkinterApp:
         self.last_scan_label = ttk.Label(security_metrics_frame, text="Last Scan: Never", font=('Arial', 9))
         self.last_scan_label.grid(row=1, column=2, padx=10, pady=2, sticky='w')
         
-        # Add automated actions indicator
-        self.automated_actions_label = ttk.Label(security_metrics_frame, text="Automated Actions: 0", font=('Arial', 9, 'bold'))
-        self.automated_actions_label.grid(row=2, column=0, padx=10, pady=2, sticky='w')
-        
-        self.threat_patterns_label = ttk.Label(security_metrics_frame, text="Recurring Threats: 0", font=('Arial', 9))
-        self.threat_patterns_label.grid(row=2, column=1, padx=10, pady=2, sticky='w')
-        
-        self.last_automated_action_label = ttk.Label(security_metrics_frame, text="Last Auto Action: Never", font=('Arial', 9))
-        self.last_automated_action_label.grid(row=2, column=2, padx=10, pady=2, sticky='w')
-        
         # ===== PROCESSES STATISTICS SECTION =====
-        processes_frame = ttk.LabelFrame(right_column, text="⚙️ Processes Statistics", padding=15)
+        processes_frame = ttk.LabelFrame(scrollable_frame, text="⚙️ Processes Statistics", padding=15)
         processes_frame.pack(fill='x', padx=10, pady=5)
         
         # Process counts
@@ -1768,7 +1684,7 @@ class NIMDATkinterApp:
         self.safe_processes_label.pack(anchor='w', pady=1)
         
         # ===== CONNECTIONS STATISTICS SECTION =====
-        connections_frame = ttk.LabelFrame(right_column, text="🌐 Network Connections", padding=15)
+        connections_frame = ttk.LabelFrame(scrollable_frame, text="🌐 Network Connections", padding=15)
         connections_frame.pack(fill='x', padx=10, pady=5)
         
         # Connection counts
@@ -1788,36 +1704,43 @@ class NIMDATkinterApp:
         self.blocked_connections_label.pack(anchor='w', pady=1)
         
         # ===== SECURITY ACTIONS SECTION =====
-        actions_frame = ttk.LabelFrame(left_scrollable_frame, text="🛡️ Security Actions", padding=15)
-        actions_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        actions_frame = ttk.LabelFrame(scrollable_frame, text="🛡️ Security Actions", padding=15)
+        actions_frame.pack(fill='x', padx=10, pady=5)
         
         # Actions log
         actions_log_frame = ttk.Frame(actions_frame)
         actions_log_frame.pack(fill='x', pady=5)
         
-        self.actions_text = scrolledtext.ScrolledText(actions_log_frame, height=12, wrap='word', font=('Arial', 9))
+        self.actions_text = scrolledtext.ScrolledText(actions_log_frame, height=8, wrap='word', font=('Arial', 9))
         self.actions_text.pack(fill='both', expand=True)
         
         # Apply dark theme to text widget
         self.apply_dark_theme_to_text_widget(self.actions_text)
         
         # ===== QUICK ACTIONS SECTION =====
-        quick_actions_frame = ttk.LabelFrame(right_column, text="⚡ Quick Actions", padding=15)
+        quick_actions_frame = ttk.LabelFrame(scrollable_frame, text="⚡ Quick Actions", padding=15)
         quick_actions_frame.pack(fill='x', padx=10, pady=5)
         
-        # Quick actions buttons arranged vertically
-        ttk.Button(quick_actions_frame, text="🔍 Full System Scan", command=self.full_scan, style='TButton').pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="🛡️ Emergency Lockdown", command=self.emergency_lockdown, style='TButton').pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="📊 System Information", command=self.show_system_info).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="� View Auto Actions", command=self.show_automated_actions_report).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="�🧪 Test AI Analysis", command=self.test_llm).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="🔄 Refresh All", command=self.refresh_dashboard).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="📈 Performance", command=self.show_performance_details).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="🗑️ Clear Actions Log", command=self.clear_actions_log).pack(fill='x', pady=2)
-        ttk.Button(quick_actions_frame, text="📋 Export Report", command=self.export_dashboard_report).pack(fill='x', pady=2)
+        # First row of buttons
+        button_frame1 = ttk.Frame(quick_actions_frame)
+        button_frame1.pack(fill='x', pady=5)
+        
+        ttk.Button(button_frame1, text="🔍 Full System Scan", command=self.full_scan, style='TButton').pack(side='left', padx=5)
+        ttk.Button(button_frame1, text="🛡️ Emergency Lockdown", command=self.emergency_lockdown, style='TButton').pack(side='left', padx=5)
+        ttk.Button(button_frame1, text="📊 System Information", command=self.show_system_info).pack(side='left', padx=5)
+        ttk.Button(button_frame1, text="🧪 Test AI Analysis", command=self.test_llm).pack(side='left', padx=5)
+        
+        # Second row of buttons
+        button_frame2 = ttk.Frame(quick_actions_frame)
+        button_frame2.pack(fill='x', pady=5)
+        
+        ttk.Button(button_frame2, text="🔄 Refresh All", command=self.refresh_dashboard).pack(side='left', padx=5)
+        ttk.Button(button_frame2, text="📈 Performance", command=self.show_performance_details).pack(side='left', padx=5)
+        ttk.Button(button_frame2, text="🗑️ Clear Actions Log", command=self.clear_actions_log).pack(side='left', padx=5)
+        ttk.Button(button_frame2, text="📋 Export Report", command=self.export_dashboard_report).pack(side='left', padx=5)
         
         # ===== REAL-TIME MONITORING SECTION =====
-        monitoring_frame = ttk.LabelFrame(right_column, text="📡 Real-Time Monitoring", padding=15)
+        monitoring_frame = ttk.LabelFrame(scrollable_frame, text="📡 Real-Time Monitoring", padding=15)
         monitoring_frame.pack(fill='x', padx=10, pady=5)
         
         # Network activity
@@ -1844,6 +1767,9 @@ class NIMDATkinterApp:
         self.uptime_label = ttk.Label(uptime_frame, text="Uptime: 0 days, 0 hours, 0 minutes", font=('Arial', 8))
         self.uptime_label.pack(anchor='w', pady=2)
         
+        # Apply dark theme to canvas
+        main_canvas.configure(bg='#2b2b2b')
+        
         # Store references for updates
         self.dashboard_elements = {
             'cpu_bar': self.cpu_bar,
@@ -1860,9 +1786,6 @@ class NIMDATkinterApp:
             'open_ports_label': self.open_ports_label,
             'anomalies_label': self.anomalies_label,
             'last_scan_label': self.last_scan_label,
-            'automated_actions_label': self.automated_actions_label,
-            'threat_patterns_label': self.threat_patterns_label,
-            'last_automated_action_label': self.last_automated_action_label,
             'total_processes_label': self.total_processes_label,
             'dangerous_processes_label': self.dangerous_processes_label,
             'medium_processes_label': self.medium_processes_label,
@@ -2406,15 +2329,12 @@ class NIMDATkinterApp:
             print(f"Error updating connections statistics: {e}")
     
     def update_threats_dashboard(self):
-        """Update threats dashboard with current security data and perform intelligent threat analysis"""
+        """Update threats dashboard with current security data"""
         try:
             # Get current security data
             connections = getattr(self, 'current_connections', [])
             port_scan = getattr(self, 'current_port_scan', [])
             anomalies = getattr(self, 'current_anomalies', [])
-            
-            # Perform intelligent threat analysis
-            self.analyze_recurring_threats(port_scan, connections, anomalies)
             
             # Update security metrics
             self.update_security_metrics(connections, port_scan, anomalies)
@@ -2424,238 +2344,6 @@ class NIMDATkinterApp:
                 
         except Exception as e:
             print(f"Error updating threats dashboard: {e}")
-    
-    def analyze_recurring_threats(self, port_scan, connections, anomalies):
-        """Analyze recurring threats and take automated action"""
-        try:
-            current_time = datetime.now()
-            
-            # Analyze port threats
-            for port in port_scan:
-                if isinstance(port, dict):
-                    port_key = f"port_{port.get('port', 'unknown')}"
-                    risk_level = port.get('risk', 'LOW')
-                    
-                    # Track recurring high-risk ports
-                    if risk_level in ['HIGH', 'CRITICAL']:
-                        self.threat_counters[port_key] += 1
-                        
-                        # If port appears repeatedly, take automated action
-                        if self.threat_counters[port_key] >= 3:
-                            self.take_automated_action(port_key, port, 'recurring_high_risk_port')
-            
-            # Analyze connection threats
-            for conn in connections:
-                if isinstance(conn, dict):
-                    remote_addr = conn.get('remote_address', 'unknown')
-                    if remote_addr and remote_addr != 'unknown':
-                        conn_key = f"connection_{remote_addr}"
-                        self.threat_counters[conn_key] += 1
-                        
-                        # If same connection appears repeatedly, investigate
-                        if self.threat_counters[conn_key] >= 5:
-                            self.take_automated_action(conn_key, conn, 'recurring_suspicious_connection')
-            
-            # Analyze anomaly patterns
-            for anomaly in anomalies:
-                if isinstance(anomaly, dict):
-                    anomaly_type = anomaly.get('type', 'unknown')
-                    anomaly_key = f"anomaly_{anomaly_type}"
-                    self.threat_counters[anomaly_key] += 1
-                    
-                    # If same anomaly type repeats, investigate deeper
-                    if self.threat_counters[anomaly_key] >= 4:
-                        self.take_automated_action(anomaly_key, anomaly, 'recurring_anomaly_pattern')
-                        
-        except Exception as e:
-            print(f"Error in recurring threat analysis: {e}")
-    
-    def take_automated_action(self, threat_key, threat_data, threat_type):
-        """Take intelligent automated action against recurring threats"""
-        try:
-            current_time = datetime.now()
-            
-            # Prevent spam actions - wait at least 30 seconds between automated actions
-            if (self.last_automated_action and 
-                (current_time - self.last_automated_action).seconds < 30):
-                return
-            
-            action_taken = None
-            
-            if threat_type == 'recurring_high_risk_port':
-                action_taken = self.handle_recurring_port_threat(threat_data)
-            elif threat_type == 'recurring_suspicious_connection':
-                action_taken = self.handle_recurring_connection_threat(threat_data)
-            elif threat_type == 'recurring_anomaly_pattern':
-                action_taken = self.handle_recurring_anomaly_threat(threat_data)
-            
-            if action_taken:
-                self.last_automated_action = current_time
-                self.automated_actions.append({
-                    'timestamp': current_time,
-                    'threat_key': threat_key,
-                    'threat_type': threat_type,
-                    'action': action_taken,
-                    'threat_data': threat_data
-                })
-                
-                # Reset counter after taking action
-                self.threat_counters[threat_key] = 0
-                
-                # Log the automated action
-                self.add_action_to_log(f"🤖 AUTOMATED ACTION: {action_taken}\n")
-                
-        except Exception as e:
-            print(f"Error taking automated action: {e}")
-    
-    def handle_recurring_port_threat(self, port_data):
-        """Handle recurring port threats with escalating responses"""
-        try:
-            port_num = port_data.get('port', 'unknown')
-            service = port_data.get('service', 'unknown')
-            
-            # Try to get the process using this port and terminate it
-            try:
-                import psutil
-                for proc in psutil.process_iter(['pid', 'name', 'connections']):
-                    try:
-                        for conn in proc.connections():
-                            if conn.laddr.port == port_num:
-                                proc_name = proc.info['name']
-                                
-                                # Don't kill critical system processes
-                                critical_processes = ['kernel_task', 'launchd', 'systemd', 'init']
-                                if proc_name.lower() not in critical_processes:
-                                    proc.terminate()
-                                    return f"Terminated process '{proc_name}' (PID: {proc.pid}) using port {port_num}"
-                                else:
-                                    return f"Blocked port {port_num} (critical process '{proc_name}' detected)"
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-                        
-                # If no process found, try to block the port using firewall rules
-                return self.block_port_with_firewall(port_num, service)
-                
-            except Exception as e:
-                return f"Attempted to handle port {port_num} threat, but encountered: {str(e)}"
-                
-        except Exception as e:
-            return f"Error handling port threat: {str(e)}"
-    
-    def handle_recurring_connection_threat(self, conn_data):
-        """Handle recurring suspicious connections"""
-        try:
-            remote_addr = conn_data.get('remote_address', 'unknown')
-            
-            if remote_addr and remote_addr != 'unknown':
-                # Add to blocked IPs list
-                blocked_file = "blocked_ips.txt"
-                try:
-                    with open(blocked_file, 'a') as f:
-                        f.write(f"{remote_addr}\n")
-                except:
-                    pass
-                
-                # Try to block using firewall (macOS pfctl or iptables on Linux)
-                try:
-                    if platform.system() == "Darwin":  # macOS
-                        # Add to pfctl block list
-                        subprocess.run(['sudo', 'pfctl', '-t', 'nimda_blocked', '-T', 'add', remote_addr], 
-                                     capture_output=True, timeout=5)
-                    elif platform.system() == "Linux":
-                        # Add iptables rule
-                        subprocess.run(['sudo', 'iptables', '-A', 'INPUT', '-s', remote_addr, '-j', 'DROP'], 
-                                     capture_output=True, timeout=5)
-                except:
-                    pass
-                
-                return f"Blocked suspicious IP address: {remote_addr}"
-            
-            return "Unable to identify IP address for blocking"
-            
-        except Exception as e:
-            return f"Error blocking connection: {str(e)}"
-    
-    def handle_recurring_anomaly_threat(self, anomaly_data):
-        """Handle recurring anomaly patterns with deep analysis"""
-        try:
-            anomaly_type = anomaly_data.get('type', 'unknown')
-            description = anomaly_data.get('description', '')
-            
-            action_description = f"Deep analysis initiated for recurring anomaly: {anomaly_type}"
-            
-            # Perform specific actions based on anomaly type
-            if 'cpu' in anomaly_type.lower():
-                # CPU anomaly - look for resource-heavy processes
-                try:
-                    import psutil
-                    high_cpu_procs = []
-                    for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
-                        try:
-                            if proc.cpu_percent() > 80:
-                                high_cpu_procs.append(f"{proc.info['name']} (PID: {proc.info['pid']})")
-                        except:
-                            continue
-                    
-                    if high_cpu_procs:
-                        action_description += f". High CPU processes detected: {', '.join(high_cpu_procs[:3])}"
-                except:
-                    pass
-                    
-            elif 'network' in anomaly_type.lower():
-                # Network anomaly - analyze network connections
-                try:
-                    import psutil
-                    external_conns = 0
-                    for conn in psutil.net_connections():
-                        if conn.raddr and not conn.raddr.ip.startswith(('127.', '192.168.', '10.')):
-                            external_conns += 1
-                    
-                    action_description += f". External connections: {external_conns}"
-                except:
-                    pass
-            
-            elif 'memory' in anomaly_type.lower():
-                # Memory anomaly - identify memory-heavy processes
-                try:
-                    import psutil
-                    high_mem_procs = []
-                    for proc in psutil.process_iter(['pid', 'name', 'memory_percent']):
-                        try:
-                            if proc.memory_percent() > 10:
-                                high_mem_procs.append(f"{proc.info['name']} ({proc.memory_percent():.1f}%)")
-                        except:
-                            continue
-                    
-                    if high_mem_procs:
-                        action_description += f". High memory processes: {', '.join(high_mem_procs[:3])}"
-                except:
-                    pass
-            
-            return action_description
-            
-        except Exception as e:
-            return f"Error analyzing anomaly: {str(e)}"
-    
-    def block_port_with_firewall(self, port_num, service):
-        """Attempt to block a port using system firewall"""
-        try:
-            if platform.system() == "Darwin":  # macOS
-                # Try to add pfctl rule
-                rule = f"block in proto tcp from any to any port {port_num}"
-                subprocess.run(['sudo', 'pfctl', '-a', 'nimda', '-f', '-'], 
-                             input=rule.encode(), timeout=5)
-                return f"Added firewall rule to block port {port_num} ({service})"
-            elif platform.system() == "Linux":
-                # Try to add iptables rule
-                subprocess.run(['sudo', 'iptables', '-A', 'INPUT', '-p', 'tcp', '--dport', str(port_num), '-j', 'DROP'], 
-                             timeout=5)
-                return f"Added iptables rule to block port {port_num} ({service})"
-            else:
-                return f"Logged recurring threat on port {port_num} ({service}) - manual intervention recommended"
-                
-        except Exception as e:
-            return f"Attempted to block port {port_num}, but firewall configuration failed: {str(e)}"
     
     def update_security_metrics(self, connections, port_scan, anomalies):
         """Update security metrics labels"""
@@ -2698,21 +2386,6 @@ class NIMDATkinterApp:
             
             if hasattr(self, 'last_scan_label'):
                 self.last_scan_label.config(text=f"Last Scan: {datetime.now().strftime('%H:%M:%S')}")
-            
-            # Update automated actions metrics
-            if hasattr(self, 'automated_actions_label'):
-                self.automated_actions_label.config(text=f"Automated Actions: {len(self.automated_actions)}")
-            
-            if hasattr(self, 'threat_patterns_label'):
-                recurring_count = sum(1 for count in self.threat_counters.values() if count >= 2)
-                self.threat_patterns_label.config(text=f"Recurring Threats: {recurring_count}")
-            
-            if hasattr(self, 'last_automated_action_label'):
-                if self.last_automated_action:
-                    last_action_time = self.last_automated_action.strftime('%H:%M:%S')
-                    self.last_automated_action_label.config(text=f"Last Auto Action: {last_action_time}")
-                else:
-                    self.last_automated_action_label.config(text="Last Auto Action: Never")
                 
         except Exception as e:
             print(f"Error updating security metrics: {e}")
@@ -4996,14 +4669,7 @@ Select actions for each threat level below:"""
                     SecurityAction.BACKUP: "💾 Backup",
                     SecurityAction.ALERT: "🚨 Alert",
                     SecurityAction.AI_ANALYSIS: "🤖 AI Analysis",
-                    SecurityAction.TRACE_ATTACK: "🔍 Trace Attack",
-                    SecurityAction.DETECT_TROJAN: "🦠 Detect Trojan",
-                    SecurityAction.ISOLATE_FILE: "📁 Isolate File",
-                    SecurityAction.DEEP_ANALYSIS: "🔬 Deep Analysis",
-                    SecurityAction.QUARANTINE: "🏥 Quarantine",
-                    SecurityAction.REMOVE_MALWARE: "🧹 Remove Malware",
-                    SecurityAction.ANALYZE_ECOSYSTEM: "🌐 Analyze Ecosystem",
-                    SecurityAction.CLEAN_TEMP: "🧹 Clean Temp Files"  # Додано
+                    SecurityAction.TRACE_ATTACK: "🔍 Trace Attack"
                 }
                 
                 cb = ttk.Checkbutton(level_frame, text=action_descriptions[action], variable=var)
