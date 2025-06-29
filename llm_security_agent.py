@@ -346,6 +346,34 @@ Provide a concise summary of the security discussion.
                 print(f"\n❌ Error: {str(e)}")
                 input("Press Enter to continue...")
 
+    def analyze_security_query(self, query: str) -> str:
+        """Analyze general security queries"""
+        try:
+            # Get current security context
+            security_context = self.get_security_context(1)  # Last hour
+            devices_context = self.get_current_devices_context()
+            
+            full_context = f"{security_context}\n\n{devices_context}"
+            
+            prompt = f"""
+You are a cybersecurity expert assistant for a Mac M1 Max system.
+
+User Query: {query}
+
+Please provide a comprehensive response that includes:
+1. Direct answer to the user's question
+2. Relevant security context from current system state
+3. Practical recommendations
+4. Any immediate actions needed
+
+Keep the response clear, actionable, and focused on security best practices.
+"""
+            
+            return self.query_ollama(prompt, full_context)
+            
+        except Exception as e:
+            return f"Error analyzing security query: {str(e)}"
+
 def main():
     """Main function"""
     agent = LLMSecurityAgent()

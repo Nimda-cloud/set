@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NIMDA Enhanced Sound Alert System
-Розширена система звукових сповіщень з інтуїтивними налаштуваннями
+Enhanced Sound Alert System for NIMDA Security
+Different sounds for different threat levels using macOS system sounds
 
 Підтримує:
 - 5 рівнів загроз (від LOW до EMERGENCY)
@@ -15,7 +15,6 @@ import sys
 import time
 import threading
 import subprocess
-from datetime import datetime
 from enum import Enum
 from colorama import Fore, Style, init
 
@@ -23,68 +22,75 @@ from colorama import Fore, Style, init
 init()
 
 class ThreatLevel(Enum):
-    """
-    Рівні загроз безпеки
-    
-    LOW: Низький рівень - інформаційні повідомлення
-    MEDIUM: Середній рівень - потребує уваги
-    HIGH: Високий рівень - потребує негайної уваги
-    CRITICAL: Критичний рівень - серйозна загроза
-    EMERGENCY: Аварійний рівень - негайне втручання
-    """
-    LOW = 1       # 🟢 Інформація
-    MEDIUM = 2    # 🟡 Увага
-    HIGH = 3      # 🟠 Небезпека
-    CRITICAL = 4  # 🔴 Критично
-    EMERGENCY = 5 # 🚨 Аварія
-
-class AlertType(Enum):
-    """
-    Типи загроз безпеки
-    
-    Кожен тип має свої характерні звуки та повідомлення
-    """
-    NETWORK_INTRUSION = "network_intrusion"      # Мережеві вторгнення
-    SUSPICIOUS_PROCESS = "suspicious_process"    # Підозрілі процеси
-    GPU_MINING = "gpu_mining"                    # Майнінг на GPU
-    LOCKDOWN_BREACH = "lockdown_breach"          # Порушення lockdown
-    SYSTEM_ERROR = "system_error"                # Системні помилки
-    PERIPHERAL_DETECTED = "peripheral_detected"  # Зовнішні пристрої
-    SSH_CONNECTION = "ssh_connection"            # SSH підключення
-    PORT_SCAN = "port_scan"                      # Сканування портів
+    """Threat levels with corresponding sound types"""
+    LOW = ("low", "Ping")
+    MEDIUM = ("medium", "Sosumi") 
+    HIGH = ("high", "Basso")
+    CRITICAL = ("critical", "Frog")
+    EMERGENCY = ("emergency", "Glass")
 
 class SoundAlertSystem:
-    """
-    Розширена система звукових сповіщень NIMDA
+    """Enhanced sound alert system with different sounds for threat levels"""
     
-    Основні можливості:
-    - Багаторівневі звукові сигнали
-    - Розумні інтервали між повідомленнями
-    - Комбіновані типи звуків (системні + beep + голос)
-    - Аварійна сирена для критичних ситуацій
-    - Детальна конфігурація для кожного типу загрози
-    """
-    
-    def __init__(self, enable_voice=True, enable_beeps=True, enable_system_sounds=True):
-        """
-        Ініціалізація системи звукових сповіщень
-        
-        Args:
-            enable_voice: Увімкнути голосові повідомлення
-            enable_beeps: Увімкнути beep сигнали
-            enable_system_sounds: Увімкнути системні звуки macOS
-        """
-        self.sound_enabled = True
-        self.voice_enabled = enable_voice
-        self.beeps_enabled = enable_beeps
-        self.system_sounds_enabled = enable_system_sounds
-        
-        # Стан аварійної сирени
-        self.emergency_active = False
-        self.emergency_thread = None
-        
-        # Контроль частоти повідомлень
+    def __init__(self):
+        self.enabled = True
+        self.volume = 0.7
+        self.sound_threads = []
         self.last_alert_time = {}
+        self.alert_cooldown = 2.0  # seconds between same alerts
+        
+        # System sound mappings for different threat levels
+        self.threat_sounds = {
+            ThreatLevel.LOW: {
+                'system': 'Ping',
+                'description': 'Gentle ping for low threats',
+                'volume': 0.3
+            },
+            ThreatLevel.MEDIUM: {
+                'system': 'Sosumi', 
+                'description': 'Warning sound for medium threats',
+                'volume': 0.5
+            },
+            ThreatLevel.HIGH: {
+                'system': 'Basso',
+                'description': 'Alert sound for high threats',
+                'volume': 0.7
+            },
+            ThreatLevel.CRITICAL: {
+                'system': 'Frog',
+                'description': 'Critical alert sound',
+                'volume': 0.8
+            },
+            ThreatLevel.EMERGENCY: {
+                'system': 'Glass',
+                'description': 'Emergency break glass sound',
+                'volume': 1.0
+            }
+        }
+        
+        # Custom alert patterns
+        self.alert_patterns = {
+            'network_attack': {
+                'sounds': [ThreatLevel.HIGH, ThreatLevel.CRITICAL],
+                'pattern': [0.5, 1.0, 0.5, 1.0],  # delays between sounds
+                'description': 'Network attack detected'
+            },
+            'suspicious_process': {
+                'sounds': [ThreatLevel.MEDIUM, ThreatLevel.HIGH],
+                'pattern': [0.3, 0.8, 0.3],
+                'description': 'Suspicious process detected'
+            },
+            'data_breach': {
+                'sounds': [ThreatLevel.CRITICAL, ThreatLevel.EMERGENCY, ThreatLevel.CRITICAL],
+                'pattern': [0.2, 0.5, 0.2, 0.5, 0.2],
+                'description': 'Data breach detected'
+            },
+            'system_compromise': {
+                'sounds': [ThreatLevel.EMERGENCY, ThreatLevel.EMERGENCY, ThreatLevel.EMERGENCY],
+                'pattern': [0.1, 0.1, 0.1, 0.5, 0.1, 0.1, 0.1],
+                'description': 'System compromise detected'
+            }
+        }
         
         # НАЛАШТУВАННЯ ІНТЕРВАЛІВ МІЖ СПОВІЩЕННЯМИ
         # Час у секундах між повторними сповіщеннями того ж типу
@@ -126,42 +132,6 @@ class SoundAlertSystem:
             ThreatLevel.EMERGENCY: {"voice": "Alex", "rate": "280"}   # Швидкий
         }
         
-        # ПОВІДОМЛЕННЯ ДЛЯ КОЖНОГО ТИПУ ЗАГРОЗИ
-        self.alert_messages = {
-            AlertType.NETWORK_INTRUSION: {
-                "short": "Network intrusion detected",
-                "detailed": "Suspicious network activity detected. Check connections."
-            },
-            AlertType.SUSPICIOUS_PROCESS: {
-                "short": "Suspicious process detected",
-                "detailed": "Unknown or suspicious process is running. Investigate immediately."
-            },
-            AlertType.GPU_MINING: {
-                "short": "GPU mining activity detected",
-                "detailed": "High GPU usage detected. Possible cryptocurrency mining."
-            },
-            AlertType.LOCKDOWN_BREACH: {
-                "short": "Lockdown system breach",
-                "detailed": "Security lockdown has been breached. System compromised."
-            },
-            AlertType.SYSTEM_ERROR: {
-                "short": "Critical system error",
-                "detailed": "System error detected. Check logs for details."
-            },
-            AlertType.PERIPHERAL_DETECTED: {
-                "short": "Unauthorized peripheral detected",
-                "detailed": "New USB or peripheral device connected without authorization."
-            },
-            AlertType.SSH_CONNECTION: {
-                "short": "Suspicious SSH connection",
-                "detailed": "Incoming SSH connection from unknown source."
-            },
-            AlertType.PORT_SCAN: {
-                "short": "Port scanning detected",
-                "detailed": "Network port scanning activity detected from external source."
-            }
-        }
-        
         # EMOJI ДЛЯ РІЗНИХ РІВНІВ
         self.threat_emoji = {
             ThreatLevel.LOW: "🟢",
@@ -177,9 +147,6 @@ class SoundAlertSystem:
     def _print_configuration(self):
         """Показати поточну конфігурацію системи"""
         print(f"{Fore.CYAN}Конфігурація:{Style.RESET_ALL}")
-        print(f"  Голосові сповіщення: {'✅' if self.voice_enabled else '❌'}")
-        print(f"  Beep сигнали: {'✅' if self.beeps_enabled else '❌'}")
-        print(f"  Системні звуки: {'✅' if self.system_sounds_enabled else '❌'}")
         print(f"  Інтервали сповіщень: {dict((k.name, f'{v}с') for k, v in self.alert_intervals.items())}")
     
     def can_play_alert(self, alert_type, threat_level):
@@ -188,7 +155,7 @@ class SoundAlertSystem:
         
         Система контролює частоту повідомлень, щоб не спамити
         """
-        if not self.sound_enabled:
+        if not self.enabled:
             return False
         
         current_time = time.time()
@@ -206,299 +173,136 @@ class SoundAlertSystem:
         self.last_alert_time[key] = current_time
         return True
     
-    def play_system_sound(self, sound_name):
-        """Відтворити системний звук macOS"""
-        if not self.system_sounds_enabled:
-            return
-        
+    def play_system_sound(self, sound_name: str, volume: float = 0.7):
+        """Play macOS system sound"""
         try:
-            # Спробувати відтворити системний звук
-            result = subprocess.run(
-                ['afplay', f'/System/Library/Sounds/{sound_name}.aiff'], 
-                check=False, capture_output=True, timeout=3
-            )
-            if result.returncode != 0:
-                # Fallback на базовий системний звук
-                subprocess.run(['osascript', '-e', 'beep'], check=False, timeout=1)
-        except Exception:
-            # Останній fallback
-            subprocess.run(['osascript', '-e', 'beep'], check=False)
+            # Use afplay to play system sounds
+            cmd = ['afplay', '-v', str(volume), f'/System/Library/Sounds/{sound_name}.aiff']
+            subprocess.run(cmd, capture_output=True, timeout=5)
+        except Exception as e:
+            print(f"Failed to play system sound {sound_name}: {e}")
     
-    def generate_beep_sequence(self, threat_level):
-        """Генерувати послідовність beep сигналів"""
-        if not self.beeps_enabled:
+    def play_threat_alert(self, threat_level: ThreatLevel, target: str = ""):
+        """Play sound alert for specific threat level"""
+        if not self.enabled:
+            return
+            
+        # Check cooldown
+        alert_key = f"{threat_level.value[0]}_{target}"
+        current_time = time.time()
+        if alert_key in self.last_alert_time:
+            if current_time - self.last_alert_time[alert_key] < self.alert_cooldown:
+                return
+        
+        self.last_alert_time[alert_key] = current_time
+        
+        # Get sound configuration
+        sound_config = self.threat_sounds.get(threat_level)
+        if not sound_config:
             return
         
-        pattern = self.beep_patterns.get(threat_level, [1])
-        
-        for i, duration in enumerate(pattern):
+        # Play sound in separate thread
+        def play_sound():
             try:
-                if duration == 1:  # Короткий beep
-                    subprocess.run(['osascript', '-e', 'beep 1'], 
-                                 check=False, timeout=1)
-                    time.sleep(0.1)
-                elif duration == 2:  # Середній beep
-                    subprocess.run(['osascript', '-e', 'beep 2'], 
-                                 check=False, timeout=1)
-                    time.sleep(0.2)
-                else:  # Довгий beep
-                    subprocess.run(['osascript', '-e', 'beep 3'], 
-                                 check=False, timeout=1)
-                    time.sleep(0.3)
-                
-                # Пауза між сигналами (крім останнього)
-                if i < len(pattern) - 1:
-                    time.sleep(0.2)
-                    
-            except Exception:
-                # Простий fallback beep
-                subprocess.run(['osascript', '-e', 'beep'], check=False)
-    
-    def play_voice_alert(self, message, threat_level):
-        """Відтворити голосове сповіщення"""
-        if not self.voice_enabled:
-            return
-        
-        try:
-            settings = self.voice_settings.get(threat_level, 
-                                             {"voice": "Alex", "rate": "200"})
-            
-            # Використовувати say команду з налаштуваннями
-            subprocess.run([
-                'say', 
-                '-v', settings["voice"], 
-                '-r', settings["rate"], 
-                message
-            ], check=False, timeout=10)
-            
-        except Exception:
-            # Fallback - простий beep замість голосу
-            subprocess.run(['osascript', '-e', 'beep'], check=False)
-    
-    def emergency_siren(self):
-        """
-        Аварійна сирена для найвищого рівня загрози
-        
-        Працює у циклі до зупинки:
-        - Швидка послідовність звуків (сирена)
-        - Голосові повідомлення різними мовами
-        - Короткі паузи між циклами
-        """
-        emergency_messages = [
-            "НАДЗВИЧАЙНА СИТУАЦІЯ! ВИЯВЛЕНО ПОРУШЕННЯ БЕЗПЕКИ!",
-            "УВАГА! ПОРУШЕННЯ БЕЗПЕКИ!",
-            "АКТИВОВАНО КРИТИЧНИЙ РІВЕНЬ ЗАГРОЗИ!",
-            "СИСТЕМА ПІД ЗАГРОЗОЮ!",
-            "ПОТРІБНЕ НЕВІДКЛАДНЕ ВТРУЧАННЯ!",
-            "НЕВІДКЛАДНІ ЗАХОДИ ПОТРІБНІ!"
-        ]
-        
-        cycle_count = 0
-        
-        while self.emergency_active:
-            cycle_count += 1
-            
-            # Сирена - швидка послідовність різних тонів
-            siren_pattern = [1, 2, 3, 2, 1, 3, 2, 1]
-            for tone in siren_pattern:
-                if not self.emergency_active:
-                    break
-                    
-                try:
-                    subprocess.run(['osascript', '-e', f'beep {tone}'], 
-                                 check=False, timeout=0.5)
-                    time.sleep(0.1)
-                except Exception:
-                    pass
-            
-            # Голосове повідомлення кожні 2 цикли
-            if self.emergency_active and cycle_count % 2 == 0:
-                message_idx = (cycle_count // 2) % len(emergency_messages)
-                message = emergency_messages[message_idx]
-                
-                try:
-                    subprocess.run([
-                        'say', '-v', 'Alex', '-r', '300', message
-                    ], check=False, timeout=5)
-                except Exception:
-                    pass
-            
-            # Коротка пауза між циклами сирени
-            if self.emergency_active:
-                time.sleep(1.5)
-    
-    def start_emergency_siren(self):
-        """Запустити аварійну сирену"""
-        if not self.emergency_active:
-            self.emergency_active = True
-            self.emergency_thread = threading.Thread(
-                target=self.emergency_siren, 
-                daemon=True,
-                name="EmergencySiren"
-            )
-            self.emergency_thread.start()
-            print(f"{Fore.RED}🚨 АВАРІЙНА СИРЕНА АКТИВОВАНА 🚨{Style.RESET_ALL}")
-    
-    def stop_emergency_siren(self):
-        """Зупинити аварійну сирену"""
-        if self.emergency_active:
-            self.emergency_active = False
-            if self.emergency_thread and self.emergency_thread.is_alive():
-                self.emergency_thread.join(timeout=2)
-            print(f"{Fore.YELLOW}🔇 Аварійна сирена зупинена{Style.RESET_ALL}")
-    
-    def trigger_alert(self, alert_type, threat_level, custom_message=None, details=None):
-        """
-        Головна функція для запуску звукового сповіщення
-        
-        Args:
-            alert_type: Тип загрози (AlertType)
-            threat_level: Рівень загрози (ThreatLevel)
-            custom_message: Власне повідомлення (опціонально)
-            details: Додаткові деталі (опціонально)
-        """
-        # Перевірити чи можна відтворити сповіщення
-        if not self.can_play_alert(alert_type, threat_level):
-            return
-        
-        # Підготувати повідомлення
-        emoji = self.threat_emoji[threat_level]
-        alert_info = self.alert_messages.get(alert_type, {})
-        
-        if custom_message:
-            voice_message = custom_message
-        else:
-            voice_message = alert_info.get("short", "Security alert")
-        
-        if details:
-            voice_message += f". {details}"
-        elif not custom_message and "detailed" in alert_info:
-            voice_message = alert_info["detailed"]
-        
-        # Показати інформацію про сповіщення
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"\n{emoji} {Fore.YELLOW}[{timestamp}] SOUND ALERT{Style.RESET_ALL}")
-        print(f"   Type: {alert_type.value}")
-        print(f"   Level: {threat_level.name}")
-        print(f"   Message: {voice_message}")
-        
-        # Для EMERGENCY рівня - запустити сирену
-        if threat_level == ThreatLevel.EMERGENCY:
-            self.start_emergency_siren()
-            return
-        
-        # Відтворити звуки у окремому потоці
-        def play_alert_sequence():
-            try:
-                # 1. Системний звук
-                if self.system_sounds_enabled:
-                    sound_name = self.system_sounds[threat_level]
-                    self.play_system_sound(sound_name)
-                    time.sleep(0.4)
-                
-                # 2. Beep послідовність
-                if self.beeps_enabled:
-                    self.generate_beep_sequence(threat_level)
-                    time.sleep(0.6)
-                
-                # 3. Голосове повідомлення (для HIGH та CRITICAL)
-                if (self.voice_enabled and 
-                    threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]):
-                    self.play_voice_alert(voice_message, threat_level)
-                
+                self.play_system_sound(sound_config['system'], sound_config['volume'])
+                print(f"🔊 {threat_level.value[0].upper()} ALERT: {sound_config['description']} - {target}")
             except Exception as e:
-                print(f"{Fore.RED}❌ Помилка звукового сповіщення: {e}{Style.RESET_ALL}")
+                print(f"Sound alert error: {e}")
         
-        # Запустити в окремому потоці щоб не блокувати основний процес
-        alert_thread = threading.Thread(
-            target=play_alert_sequence, 
-            daemon=True,
-            name=f"Alert_{alert_type.value}_{threat_level.name}"
-        )
-        alert_thread.start()
+        thread = threading.Thread(target=play_sound, daemon=True)
+        thread.start()
+        self.sound_threads.append(thread)
     
-    def enable_sound(self):
-        """Увімкнути всі звукові сповіщення"""
-        self.sound_enabled = True
-        print(f"{Fore.GREEN}🔊 Звукові сповіщення увімкнено{Style.RESET_ALL}")
-    
-    def disable_sound(self):
-        """Вимкнути всі звукові сповіщення"""
-        self.sound_enabled = False
-        self.stop_emergency_siren()
-        print(f"{Fore.YELLOW}🔇 Звукові сповіщення вимкнено{Style.RESET_ALL}")
-    
-    def toggle_voice(self):
-        """Переключити голосові повідомлення"""
-        self.voice_enabled = not self.voice_enabled
-        status = "увімкнено" if self.voice_enabled else "вимкнено"
-        print(f"{Fore.CYAN}🗣️  Голосові сповіщення {status}{Style.RESET_ALL}")
-    
-    def toggle_beeps(self):
-        """Переключити beep сигнали"""
-        self.beeps_enabled = not self.beeps_enabled
-        status = "увімкнено" if self.beeps_enabled else "вимкнено"
-        print(f"{Fore.CYAN}📢 Beep сповіщення {status}{Style.RESET_ALL}")
-    
-    def test_alert_level(self, threat_level):
-        """Тестувати конкретний рівень загрози"""
-        print(f"{Fore.CYAN}🎵 Тестування {threat_level.name} рівня...{Style.RESET_ALL}")
-        
-        test_alert_type = AlertType.SYSTEM_ERROR
-        test_message = f"Це тестовий сповіщення {threat_level.name} рівня"
-        
-        self.trigger_alert(test_alert_type, threat_level, test_message)
-    
-    def test_all_alerts(self):
-        """Тестувати всі рівні загроз"""
-        print(f"{Fore.CYAN}🎵 Тестування всіх рівнів сповіщень...{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Примітка: Кожен тест буде очікувати відповідний інтервал{Style.RESET_ALL}\n")
-        
-        test_cases = [
-            (AlertType.SYSTEM_ERROR, ThreatLevel.LOW, "Інформація низького пріоритету"),
-            (AlertType.PERIPHERAL_DETECTED, ThreatLevel.MEDIUM, "Попередження середнього пріоритету"),
-            (AlertType.SUSPICIOUS_PROCESS, ThreatLevel.HIGH, "Сповіщення високого пріоритету"),
-            (AlertType.NETWORK_INTRUSION, ThreatLevel.CRITICAL, "Критична загроза безпеки"),
-        ]
-        
-        for i, (alert_type, threat_level, message) in enumerate(test_cases, 1):
-            print(f"[{i}/4] Тестування {threat_level.name} рівня...")
-            self.trigger_alert(alert_type, threat_level, message)
+    def play_alert_pattern(self, pattern_name: str, target: str = ""):
+        """Play complex alert pattern for specific events"""
+        if not self.enabled:
+            return
             
-            # Пауза між тестами
-            if i < len(test_cases):
-                wait_time = 4
-                print(f"   Очікування {wait_time}с перед наступним тестом...")
-                time.sleep(wait_time)
+        pattern = self.alert_patterns.get(pattern_name)
+        if not pattern:
+            return
         
-        print(f"\n{Fore.GREEN}✅ Тестування сповіщень завершено{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Примітка: EMERGENCY рівень не протестовано (використовуйте команду 'emergency'){Style.RESET_ALL}")
+        def play_pattern():
+            try:
+                for i, sound_level in enumerate(pattern['sounds']):
+                    sound_config = self.threat_sounds.get(sound_level)
+                    if sound_config:
+                        self.play_system_sound(sound_config['system'], sound_config['volume'])
+                    
+                    # Wait for next sound
+                    if i < len(pattern['pattern']):
+                        time.sleep(pattern['pattern'][i])
+                
+                print(f"🔊 PATTERN ALERT: {pattern['description']} - {target}")
+            except Exception as e:
+                print(f"Pattern alert error: {e}")
+        
+        thread = threading.Thread(target=play_pattern, daemon=True)
+        thread.start()
+        self.sound_threads.append(thread)
     
-    def show_status(self):
-        """Показати статус системи"""
-        print(f"\n{Fore.CYAN}🔊 Статус системи звукових сповіщень NIMDA{Style.RESET_ALL}")
-        print("=" * 40)
-        print(f"Звукова система: {'🟢 Увімкнено' if self.sound_enabled else '🔴 Вимкнено'}")
-        print(f"Голосові сповіщення: {'🟢 Увімкнено' if self.voice_enabled else '🔴 Вимкнено'}")
-        print(f"Beep сигнали: {'🟢 Увімкнено' if self.beeps_enabled else '🔴 Вимкнено'}")
-        print(f"Системні звуки: {'🟢 Увімкнено' if self.system_sounds_enabled else '🔴 Вимкнено'}")
-        print(f"Аварійна сирена: {'🚨 АКТИВНА' if self.emergency_active else '🔇 Неактивна'}")
-        print()
+    def play_custom_sequence(self, sounds: list, delays: list, description: str = ""):
+        """Play custom sequence of sounds"""
+        if not self.enabled:
+            return
         
-        print("Інтервали сповіщень:")
-        for level, interval in self.alert_intervals.items():
-            emoji = self.threat_emoji[level]
-            print(f"  {emoji} {level.name}: {interval}с")
-        print()
+        def play_sequence():
+            try:
+                for i, sound_level in enumerate(sounds):
+                    sound_config = self.threat_sounds.get(sound_level)
+                    if sound_config:
+                        self.play_system_sound(sound_config['system'], sound_config['volume'])
+                    
+                    # Wait for next sound
+                    if i < len(delays):
+                        time.sleep(delays[i])
+                
+                if description:
+                    print(f"🔊 CUSTOM ALERT: {description}")
+            except Exception as e:
+                print(f"Custom sequence error: {e}")
         
-        if self.last_alert_time:
-            print("Останні сповіщення:")
-            for key, timestamp in list(self.last_alert_time.items())[-5:]:
-                time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
-                print(f"  {time_str}: {key}")
-        else:
-            print("Немає останніх сповіщень")
-
+        thread = threading.Thread(target=play_sequence, daemon=True)
+        thread.start()
+        self.sound_threads.append(thread)
+    
+    def test_sounds(self):
+        """Test all available sounds"""
+        print("🔊 Testing Sound Alert System...")
+        
+        for threat_level in ThreatLevel:
+            print(f"\nTesting {threat_level.value[0].upper()} level...")
+            self.play_threat_alert(threat_level, "TEST")
+            time.sleep(1)
+        
+        print("\nTesting alert patterns...")
+        for pattern_name in self.alert_patterns:
+            print(f"\nTesting {pattern_name} pattern...")
+            self.play_alert_pattern(pattern_name, "TEST")
+            time.sleep(2)
+        
+        print("\n✅ Sound test completed!")
+    
+    def set_volume(self, volume: float):
+        """Set system volume (0.0 to 1.0)"""
+        self.volume = max(0.0, min(1.0, volume))
+    
+    def enable(self):
+        """Enable sound alerts"""
+        self.enabled = True
+        print("🔊 Sound alerts enabled")
+    
+    def disable(self):
+        """Disable sound alerts"""
+        self.enabled = False
+        print("🔇 Sound alerts disabled")
+    
+    def cleanup(self):
+        """Clean up sound threads"""
+        for thread in self.sound_threads:
+            if thread.is_alive():
+                thread.join(timeout=1.0)
+        self.sound_threads.clear()
 
 # Глобальний екземпляр системи
 sound_system = None
@@ -510,20 +314,15 @@ def get_sound_system():
         sound_system = SoundAlertSystem()
     return sound_system
 
-def play_alert(alert_type, threat_level, message=None, details=None):
-    """Зручна функція для запуску сповіщень"""
-    system = get_sound_system()
-    system.trigger_alert(alert_type, threat_level, message, details)
-
 def emergency_alert(message="НАДЗВИЧАЙНА СИТУАЦІЯ"):
     """Запустити аварійне сповіщення"""
     system = get_sound_system()
-    system.trigger_alert(AlertType.LOCKDOWN_BREACH, ThreatLevel.EMERGENCY, message)
+    system.play_threat_alert(ThreatLevel.EMERGENCY, message)
 
 def stop_emergency():
     """Зупинити аварійну сирену"""
     system = get_sound_system()
-    system.stop_emergency_siren()
+    system.cleanup()
 
 if __name__ == "__main__":
     print(f"{Fore.CYAN}Розширена система звукових сповіщень NIMDA{Style.RESET_ALL}")
@@ -536,7 +335,7 @@ if __name__ == "__main__":
         command = sys.argv[1].lower()
         
         if command == "test":
-            system.test_all_alerts()
+            system.test_sounds()
         elif command == "emergency":
             print(f"{Fore.RED}Тестування EMERGENCY рівня...{Style.RESET_ALL}")
             emergency_alert("ТЕСТ НАДЗВИЧАЙНОЇ СИТУАЦІЇ")
@@ -560,7 +359,7 @@ if __name__ == "__main__":
                     if cmd in ["quit", "exit", "q"]:
                         break
                     elif cmd == "test":
-                        system.test_all_alerts()
+                        system.test_sounds()
                     elif cmd == "status":
                         system.show_status()
                     elif cmd == "emergency":
@@ -572,9 +371,9 @@ if __name__ == "__main__":
                     elif cmd == "beeps":
                         system.toggle_beeps()
                     elif cmd == "enable":
-                        system.enable_sound()
+                        system.enable()
                     elif cmd == "disable":
-                        system.disable_sound()
+                        system.disable()
                     elif cmd in ["low", "medium", "high", "critical"]:
                         level = ThreatLevel[cmd.upper()]
                         system.test_alert_level(level)

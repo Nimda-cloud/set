@@ -1,0 +1,39 @@
+{
+  "LOW": [
+    "monitor",
+    "log"
+  ],
+  "MEDIUM": [
+    "monitor",
+    "log",
+    "alert"
+  ],
+  "HIGH": [
+    "monitor",
+    "log",
+    "analyze",
+    "block",
+    "alert"
+  ],
+  "CRITICAL": [
+    "monitor",
+    "log",
+    "analyze",
+    "block",
+    "isolate",
+    "ai_analysis",
+    "alert"
+  ],
+  "EMERGENCY": [
+    "monitor",
+    "log",
+    "analyze",
+    "block",
+    "isolate",
+    "terminate",
+    "backup",
+    "ai_analysis",
+    "trace_attack",
+    "alert"
+  ]
+}

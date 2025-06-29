@@ -1,11 +1,11 @@
 {
   "ollama": {
     "url": "http://localhost:11434",
-    "model": "llama2"
+    "model": "llama3:latest"
   },
   "gemini": {
-    "api_key": "AIzaSyD_gPLOPzoRpUtc6Ab3jYR5lVPurcCrJF8",
-    "model": "gemini-flash"
+    "api_key": "AIzaSyDkjrkey-_h9PwubvoIH1CZr6iZPp2wrIA",
+    "model": "gemini-2.0-flash"
   },
   "groq": {
     "api_key": "",

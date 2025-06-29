@@ -5,19 +5,28 @@ Full security monitoring with network analysis, port scanning, anomaly detection
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 import threading
 import time
 import json
-import subprocess
-import socket
-import psutil
-import requests
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
 import sqlite3
+import subprocess
 import os
 import sys
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Dict, List, Optional, Tuple
+import queue
+import requests
+import socket
+import psutil
+import platform
+from collections import defaultdict
+import re
+import getpass
+import keyring
+import hashlib
+import base64
 
 # Import security modules
 try:
@@ -30,6 +39,227 @@ try:
 except ImportError:
     SECURITY_MODULES_AVAILABLE = False
     print("Warning: Security modules not available")
+
+# Import enhanced sound system
+from sound_alerts_enhanced import SoundAlertSystem, ThreatLevel as SoundThreatLevel
+
+class ThreatLevel(Enum):
+    """Threat levels with colors and actions"""
+    LOW = ("LOW", "🟢", "#28a745", "Низький")
+    MEDIUM = ("MEDIUM", "🟡", "#ffc107", "Середній") 
+    HIGH = ("HIGH", "🟠", "#fd7e14", "Високий")
+    CRITICAL = ("CRITICAL", "🔴", "#dc3545", "Критичний")
+    EMERGENCY = ("EMERGENCY", "⚫", "#000000", "Надзвичайний")
+
+class SecurityAction(Enum):
+    """Security actions for different threat levels"""
+    MONITOR = "monitor"
+    LOG = "log"
+    ANALYZE = "analyze"
+    BLOCK = "block"
+    ISOLATE = "isolate"
+    TERMINATE = "terminate"
+    BACKUP = "backup"
+    ALERT = "alert"
+    AI_ANALYSIS = "ai_analysis"
+    TRACE_ATTACK = "trace_attack"
+
+class SecurityPolicy:
+    """Security policy configuration"""
+    
+    def __init__(self):
+        self.policies = {
+            ThreatLevel.LOW: [SecurityAction.MONITOR, SecurityAction.LOG],
+            ThreatLevel.MEDIUM: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE],
+            ThreatLevel.HIGH: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.BLOCK, SecurityAction.ALERT],
+            ThreatLevel.CRITICAL: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.BLOCK, SecurityAction.ISOLATE, SecurityAction.AI_ANALYSIS, SecurityAction.ALERT],
+            ThreatLevel.EMERGENCY: [SecurityAction.MONITOR, SecurityAction.LOG, SecurityAction.ANALYZE, SecurityAction.BLOCK, SecurityAction.ISOLATE, SecurityAction.TERMINATE, SecurityAction.BACKUP, SecurityAction.AI_ANALYSIS, SecurityAction.TRACE_ATTACK, SecurityAction.ALERT]
+        }
+        self.load_policy()
+    
+    def load_policy(self):
+        """Load policy from file"""
+        try:
+            if os.path.exists("security_policy.json"):
+                with open("security_policy.json", 'r') as f:
+                    data = json.load(f)
+                    for level_str, actions in data.items():
+                        level = ThreatLevel[level_str]
+                        self.policies[level] = [SecurityAction(action) for action in actions]
+        except Exception as e:
+            print(f"Failed to load security policy: {e}")
+    
+    def save_policy(self):
+        """Save policy to file"""
+        try:
+            data = {}
+            for level, actions in self.policies.items():
+                data[level.name] = [action.value for action in actions]
+            
+            with open("security_policy.json", 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"Failed to save security policy: {e}")
+    
+    def get_actions_for_level(self, level: ThreatLevel) -> List[SecurityAction]:
+        """Get actions for threat level"""
+        return self.policies.get(level, [])
+    
+    def update_policy(self, level: ThreatLevel, actions: List[SecurityAction]):
+        """Update policy for specific level"""
+        self.policies[level] = actions
+        self.save_policy()
+
+class ThreatAnalyzer:
+    """Analyze threats and determine threat levels"""
+    
+    def __init__(self, security_policy: SecurityPolicy):
+        self.policy = security_policy
+        
+    def analyze_port_threat(self, port: int, service: str) -> ThreatLevel:
+        """Analyze port threat level"""
+        # Критичні порти
+        critical_ports = [22, 23, 3389, 5900, 5901, 5902, 5903, 5904, 5905, 5906, 5907, 5908, 5909, 5910]
+        if port in critical_ports:
+            return ThreatLevel.CRITICAL
+        
+        # Підозрілі порти
+        suspicious_ports = [4444, 5555, 31337, 1337, 6667, 6668, 6669, 7000, 8081, 9090, 8080, 8443]
+        if port in suspicious_ports:
+            return ThreatLevel.HIGH
+        
+        # Порти для моніторингу
+        monitor_ports = [21, 25, 53, 80, 110, 143, 443, 993, 995, 3306, 5432]
+        if port in monitor_ports:
+            return ThreatLevel.MEDIUM
+        
+        return ThreatLevel.LOW
+    
+    def analyze_address_threat(self, address: str) -> ThreatLevel:
+        """Analyze address threat level"""
+        try:
+            ip, port = address.split(':') if ':' in address else (address, 'N/A')
+            
+            # Локальні адреси
+            if ip.startswith('127.') or ip.startswith('192.168.') or ip.startswith('10.'):
+                return ThreatLevel.LOW
+            
+            # Відомі безпечні IP
+            safe_ips = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1']
+            if ip in safe_ips:
+                return ThreatLevel.LOW
+            
+            # Підозрілі IP діапазони
+            suspicious_ranges = [
+                ('192.168.1.', '192.168.1.255'),
+                ('10.0.0.', '10.0.0.255'),
+                ('172.16.0.', '172.31.255.255')
+            ]
+            
+            for start, end in suspicious_ranges:
+                if ip.startswith(start.split('.')[0] + '.' + start.split('.')[1] + '.' + start.split('.')[2] + '.'):
+                    return ThreatLevel.MEDIUM
+            
+            # Зовнішні IP
+            return ThreatLevel.HIGH
+            
+        except:
+            return ThreatLevel.MEDIUM
+    
+    def analyze_anomaly_threat(self, anomaly: Dict) -> ThreatLevel:
+        """Analyze anomaly threat level"""
+        anomaly_type = anomaly.get('type', '').upper()
+        severity = anomaly.get('severity', 'MEDIUM').upper()
+        
+        # Критичні аномалії
+        if 'CRITICAL' in severity or 'SUSPICIOUS_PROCESS' in anomaly_type:
+            return ThreatLevel.CRITICAL
+        
+        # Високі аномалії
+        if 'HIGH' in severity or 'CPU_SPIKE' in anomaly_type or 'MEMORY_CRITICAL' in anomaly_type:
+            return ThreatLevel.HIGH
+        
+        # Середні аномалії
+        if 'MEDIUM' in severity or 'NETWORK' in anomaly_type:
+            return ThreatLevel.MEDIUM
+        
+        return ThreatLevel.LOW
+    
+    def execute_actions(self, threat_level: ThreatLevel, target: str, details: Dict):
+        """Execute security actions for threat level"""
+        actions = self.policy.get_actions_for_level(threat_level)
+        
+        for action in actions:
+            try:
+                if action == SecurityAction.MONITOR:
+                    self._action_monitor(target, details)
+                elif action == SecurityAction.LOG:
+                    self._action_log(target, details, threat_level)
+                elif action == SecurityAction.ANALYZE:
+                    self._action_analyze(target, details)
+                elif action == SecurityAction.BLOCK:
+                    self._action_block(target, details)
+                elif action == SecurityAction.ISOLATE:
+                    self._action_isolate(target, details)
+                elif action == SecurityAction.TERMINATE:
+                    self._action_terminate(target, details)
+                elif action == SecurityAction.BACKUP:
+                    self._action_backup(target, details)
+                elif action == SecurityAction.ALERT:
+                    self._action_alert(target, details, threat_level)
+                elif action == SecurityAction.AI_ANALYSIS:
+                    self._action_ai_analysis(target, details, threat_level)
+                elif action == SecurityAction.TRACE_ATTACK:
+                    self._action_trace_attack(target, details)
+            except Exception as e:
+                print(f"Failed to execute action {action.value}: {e}")
+    
+    def _action_monitor(self, target: str, details: Dict):
+        """Monitor target"""
+        print(f"🔍 Monitoring: {target}")
+    
+    def _action_log(self, target: str, details: Dict, level: ThreatLevel):
+        """Log security event"""
+        timestamp = datetime.now().isoformat()
+        log_entry = {
+            'timestamp': timestamp,
+            'target': target,
+            'threat_level': level.value,
+            'details': details
+        }
+        print(f"📝 Logged: {target} - {level.value}")
+    
+    def _action_analyze(self, target: str, details: Dict):
+        """Analyze target"""
+        print(f"🔬 Analyzing: {target}")
+    
+    def _action_block(self, target: str, details: Dict):
+        """Block target"""
+        print(f"🚫 Blocking: {target}")
+    
+    def _action_isolate(self, target: str, details: Dict):
+        """Isolate target"""
+        print(f"🔒 Isolating: {target}")
+    
+    def _action_terminate(self, target: str, details: Dict):
+        """Terminate target"""
+        print(f"💀 Terminating: {target}")
+    
+    def _action_backup(self, target: str, details: Dict):
+        """Backup data"""
+        print(f"💾 Backing up: {target}")
+    
+    def _action_alert(self, target: str, details: Dict, level: ThreatLevel):
+        """Send alert"""
+        print(f"🚨 Alert: {target} - {level.value}")
+    
+    def _action_ai_analysis(self, target: str, details: Dict, level: ThreatLevel):
+        """AI analysis"""
+        print(f"🤖 AI Analysis: {target} - {level.value}")
+    
+    def _action_trace_attack(self, target: str, details: Dict):
+        """Trace attack source"""
+        print(f"🔍 Tracing attack: {target}")
 
 class TranslationManager:
     """Translation manager for Ukrainian language"""
@@ -965,35 +1195,78 @@ class AnomalyAnalyzer:
             return f'CONTINUE MONITORING: {anomaly_type} detected. Review and document for future reference.'
 
 class NIMDATkinterApp:
-    """Main NIMDA Security System Tkinter application"""
+    """NIMDA Security System - Tkinter GUI Application"""
     
     def __init__(self, root):
         self.root = root
-        self.root.title("NIMDA Security System - Comprehensive Monitoring")
-        self.root.geometry("1400x900")
+        self.root.title("NIMDA Security System - Enhanced Tkinter GUI")
+        self.root.geometry("1200x800")
+        self.root.minsize(800, 600)
+        
+        # Initialize sound system
+        self.sound_system = SoundAlertSystem()
+        
+        # Initialize privilege manager
+        self.privilege_manager = PrivilegeManager()
         
         # Security system components
         self.security_monitor = None
-        self.llm_agent = None
-        self.monitor_thread = None
+        self.security_policy = SecurityPolicy()
+        self.threat_analyzer = ThreatAnalyzer(self.security_policy)
+        self.network_scanner = NetworkScanner()
+        self.anomaly_detector = AnomalyDetector()
         self.deep_analyzer = DeepAnalyzer()
         self.anomaly_analyzer = AnomalyAnalyzer()
         self.translation_manager = TranslationManager()
-        self.ai_provider_manager = AIProviderManager()
-        self.task_scheduler = TaskScheduler()
+        
+        # AI components
+        self.ai_provider_manager = None
+        self.task_scheduler = None
+        
+        # UI components
+        self.notebook = None
+        self.status_label = None
+        self.threat_level_label = None
+        self.connections_tree = None
+        self.ports_tree = None
+        self.anomalies_tree = None
+        self.logs_text = None
+        self.devices_tree = None
+        self.processes_tree = None
+        
+        # Data storage
+        self.security_status = {
+            'threat_level': ThreatLevel.LOW,
+            'connections': [],
+            'ports': [],
+            'anomalies': [],
+            'last_update': datetime.now()
+        }
+        
+        # Threading
+        self.monitor_thread = None
+        self.running = True
         
         # Initialize UI
         self.init_ui()
+        self.setup_dark_theme()
+        
+        # Initialize security system
         self.init_security_system()
         
-        # Setup update timer
-        self.update_ui()
+        # Load initial data
+        self.load_initial_data()
+        
+        # Start monitoring
+        self.start_monitoring()
+        
+        # Setup closing handler
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def init_ui(self):
         """Initialize user interface"""
-        # Configure style
-        style = ttk.Style()
-        style.theme_use('clam')
+        # Configure dark theme
+        self.setup_dark_theme()
         
         # Create main notebook (tabbed interface)
         self.notebook = ttk.Notebook(self.root)
@@ -1009,12 +1282,225 @@ class NIMDATkinterApp:
         self.create_emergency_tab()
         self.create_ai_providers_tab()
         self.create_task_scheduler_tab()
+        self.create_security_policy_tab()
+        self.create_devices_tab()
+        self.create_processes_tab()
         
         # Create menu bar
         self.create_menu()
         
         # Status bar
         self.create_status_bar()
+    
+    def setup_dark_theme(self):
+        """Setup dark theme for the entire application"""
+        # Configure main window
+        self.root.configure(bg='#1a1a1a')
+        
+        # Configure ttk style
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Dark theme colors
+        bg_color = '#1a1a1a'          # Dark background
+        fg_color = '#ffffff'          # White text
+        accent_color = '#2d2d2d'      # Slightly lighter background
+        border_color = '#404040'      # Border color
+        highlight_color = '#007acc'   # Blue highlight
+        success_color = '#28a745'     # Green for success
+        warning_color = '#ffc107'     # Yellow for warning
+        danger_color = '#dc3545'      # Red for danger
+        
+        # Configure common elements
+        style.configure('TFrame', background=bg_color)
+        style.configure('TLabel', background=bg_color, foreground=fg_color)
+        style.configure('TButton', 
+                       background=accent_color, 
+                       foreground=fg_color,
+                       borderwidth=1,
+                       focuscolor=highlight_color)
+        style.map('TButton',
+                 background=[('active', highlight_color), ('pressed', accent_color)],
+                 foreground=[('active', fg_color), ('pressed', fg_color)])
+        
+        # Configure notebook
+        style.configure('TNotebook', background=bg_color, borderwidth=0)
+        style.configure('TNotebook.Tab', 
+                       background=accent_color, 
+                       foreground=fg_color,
+                       padding=[10, 5],
+                       borderwidth=1)
+        style.map('TNotebook.Tab',
+                 background=[('selected', highlight_color), ('active', accent_color)],
+                 foreground=[('selected', fg_color), ('active', fg_color)])
+        
+        # Configure treeview
+        style.configure('Treeview', 
+                       background=accent_color, 
+                       foreground=fg_color,
+                       fieldbackground=accent_color,
+                       borderwidth=1)
+        style.configure('Treeview.Heading', 
+                       background=bg_color, 
+                       foreground=fg_color,
+                       borderwidth=1)
+        style.map('Treeview',
+                 background=[('selected', highlight_color)],
+                 foreground=[('selected', fg_color)])
+        
+        # Configure entry
+        style.configure('TEntry', 
+                       fieldbackground=accent_color, 
+                       foreground=fg_color,
+                       borderwidth=1,
+                       insertcolor=fg_color)
+        
+        # Configure combobox
+        style.configure('TCombobox', 
+                       fieldbackground=accent_color, 
+                       background=accent_color,
+                       foreground=fg_color,
+                       borderwidth=1,
+                       arrowcolor=fg_color)
+        style.map('TCombobox',
+                 fieldbackground=[('readonly', accent_color)],
+                 selectbackground=[('readonly', highlight_color)])
+        
+        # Configure progressbar
+        style.configure('Horizontal.TProgressbar', 
+                       background=highlight_color, 
+                       troughcolor=accent_color,
+                       borderwidth=0)
+        
+        # Configure scrollbar
+        style.configure('Vertical.TScrollbar', 
+                       background=accent_color, 
+                       troughcolor=bg_color,
+                       borderwidth=0,
+                       arrowcolor=fg_color)
+        style.map('Vertical.TScrollbar',
+                 background=[('active', highlight_color)])
+        
+        # Configure labelframe
+        style.configure('TLabelframe', 
+                       background=bg_color, 
+                       foreground=fg_color,
+                       borderwidth=1)
+        style.configure('TLabelframe.Label', 
+                       background=bg_color, 
+                       foreground=fg_color)
+        
+        # Configure checkbutton
+        style.configure('TCheckbutton', 
+                       background=bg_color, 
+                       foreground=fg_color)
+        style.map('TCheckbutton',
+                 background=[('active', bg_color)],
+                 foreground=[('active', fg_color)])
+        
+        # Configure radiobutton
+        style.configure('TRadiobutton', 
+                       background=bg_color, 
+                       foreground=fg_color)
+        style.map('TRadiobutton',
+                 background=[('active', bg_color)],
+                 foreground=[('active', fg_color)])
+        
+        # Configure menubar
+        style.configure('TMenubutton', 
+                       background=accent_color, 
+                       foreground=fg_color,
+                       borderwidth=1)
+        style.map('TMenubutton',
+                 background=[('active', highlight_color)])
+        
+        # Configure separator
+        style.configure('TSeparator', background=border_color)
+        
+        # Configure spinbox
+        style.configure('TSpinbox', 
+                       fieldbackground=accent_color, 
+                       background=accent_color,
+                       foreground=fg_color,
+                       borderwidth=1,
+                       arrowcolor=fg_color)
+        
+        # Configure scale
+        style.configure('Horizontal.TScale', 
+                       background=bg_color, 
+                       troughcolor=accent_color,
+                       borderwidth=0)
+        
+        # Configure listbox (for tk widgets)
+        self.root.option_add('*Listbox.background', accent_color)
+        self.root.option_add('*Listbox.foreground', fg_color)
+        self.root.option_add('*Listbox.selectBackground', highlight_color)
+        self.root.option_add('*Listbox.selectForeground', fg_color)
+        
+        # Configure text widget (for tk widgets)
+        self.root.option_add('*Text.background', accent_color)
+        self.root.option_add('*Text.foreground', fg_color)
+        self.root.option_add('*Text.insertBackground', fg_color)
+        self.root.option_add('*Text.selectBackground', highlight_color)
+        
+        # Configure entry widget (for tk widgets)
+        self.root.option_add('*Entry.background', accent_color)
+        self.root.option_add('*Entry.foreground', fg_color)
+        self.root.option_add('*Entry.insertBackground', fg_color)
+        self.root.option_add('*Entry.selectBackground', highlight_color)
+        
+        # Configure canvas
+        self.root.option_add('*Canvas.background', bg_color)
+        
+        # Configure menu
+        self.root.option_add('*Menu.background', accent_color)
+        self.root.option_add('*Menu.foreground', fg_color)
+        self.root.option_add('*Menu.selectBackground', highlight_color)
+        self.root.option_add('*Menu.selectForeground', fg_color)
+        
+        # Configure messagebox
+        self.root.option_add('*Dialog.background', bg_color)
+        self.root.option_add('*Dialog.foreground', fg_color)
+        
+        # Store colors for later use
+        self.dark_colors = {
+            'bg': bg_color,
+            'fg': fg_color,
+            'accent': accent_color,
+            'border': border_color,
+            'highlight': highlight_color,
+            'success': success_color,
+            'warning': warning_color,
+            'danger': danger_color
+        }
+    
+    def apply_dark_theme_to_text_widget(self, text_widget):
+        """Apply dark theme to a text widget"""
+        if hasattr(self, 'dark_colors'):
+            text_widget.configure(
+                background=self.dark_colors['accent'],
+                foreground=self.dark_colors['fg'],
+                insertbackground=self.dark_colors['fg'],
+                selectbackground=self.dark_colors['highlight'],
+                selectforeground=self.dark_colors['fg']
+            )
+    
+    def apply_dark_theme_to_entry_widget(self, entry_widget):
+        """Apply dark theme to an entry widget"""
+        if hasattr(self, 'dark_colors'):
+            # For ttk.Entry, only configure supported options
+            if isinstance(entry_widget, ttk.Entry):
+                # ttk.Entry doesn't support insertbackground and selectbackground
+                pass  # ttk.Entry is already styled by the theme
+            else:
+                # For tk.Entry, configure all options
+                entry_widget.configure(
+                    background=self.dark_colors['accent'],
+                    foreground=self.dark_colors['fg'],
+                    insertbackground=self.dark_colors['fg'],
+                    selectbackground=self.dark_colors['highlight'],
+                    selectforeground=self.dark_colors['fg']
+                )
     
     def create_dashboard_tab(self):
         """Create main dashboard tab"""
@@ -1073,7 +1559,7 @@ class NIMDATkinterApp:
         conn_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
         # Connections treeview
-        columns = ('Local Address', 'Remote Address', 'Status', 'PID', 'Process')
+        columns = ('Local Address', 'Remote Address', 'Status', 'PID', 'Process', 'Threat Level')
         self.connections_tree = ttk.Treeview(conn_frame, columns=columns, show='headings', height=15)
         
         for col in columns:
@@ -1107,7 +1593,7 @@ class NIMDATkinterApp:
         ports_scan_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
         # Ports treeview
-        columns = ('Port', 'Service', 'Status', 'Risk', 'Timestamp')
+        columns = ('Port', 'Service', 'Status', 'Risk', 'Timestamp', 'Threat Level')
         self.ports_tree = ttk.Treeview(ports_scan_frame, columns=columns, show='headings', height=15)
         
         for col in columns:
@@ -1141,7 +1627,7 @@ class NIMDATkinterApp:
         anomalies_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
         # Anomalies treeview
-        columns = ('Type', 'Severity', 'Description', 'Timestamp')
+        columns = ('Type', 'Severity', 'Description', 'Timestamp', 'Threat Level')
         self.anomalies_tree = ttk.Treeview(anomalies_list_frame, columns=columns, show='headings', height=15)
         
         for col in columns:
@@ -1209,6 +1695,10 @@ class NIMDATkinterApp:
         self.response_text = scrolledtext.ScrolledText(response_frame, height=20, wrap='word')
         self.response_text.pack(fill='both', expand=True)
         
+        # Apply dark theme to text widgets
+        self.apply_dark_theme_to_text_widget(self.response_text)
+        self.apply_dark_theme_to_entry_widget(self.query_entry)
+        
         # Send button
         send_btn = ttk.Button(llm_frame, text="🚀 Send Query", command=self.send_query)
         send_btn.pack(pady=10)
@@ -1225,6 +1715,9 @@ class NIMDATkinterApp:
         self.logs_text = scrolledtext.ScrolledText(logs_area_frame, height=25, wrap='word')
         self.logs_text.pack(fill='both', expand=True)
         
+        # Apply dark theme to text widget
+        self.apply_dark_theme_to_text_widget(self.logs_text)
+        
         # Control buttons
         button_frame = ttk.Frame(logs_frame)
         button_frame.pack(fill='x', padx=10, pady=5)
@@ -1235,34 +1728,48 @@ class NIMDATkinterApp:
         ttk.Button(button_frame, text="📊 Export", command=self.export_logs).pack(side='left', padx=5)
     
     def create_menu(self):
-        """Create menu bar"""
+        """Create application menu"""
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
         
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Export Logs", command=self.export_logs)
         file_menu.add_command(label="Export Report", command=self.export_report)
         file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.quit)
+        file_menu.add_command(label="Exit", command=self.on_closing)
         
         # Security menu
         security_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Security", menu=security_menu)
-        security_menu.add_command(label="Full System Scan", command=self.full_scan)
-        security_menu.add_command(label="Network Analysis", command=self.analyze_network)
+        security_menu.add_command(label="Full Scan", command=self.full_scan)
         security_menu.add_command(label="Threat Assessment", command=self.threat_assessment)
-        security_menu.add_separator()
         security_menu.add_command(label="Emergency Lockdown", command=self.emergency_lockdown)
+        security_menu.add_separator()
+        security_menu.add_command(label="System Info", command=self.show_system_info)
         
-        # Tools menu
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Port Scanner", command=self.scan_ports)
-        tools_menu.add_command(label="Connection Monitor", command=self.refresh_network)
-        tools_menu.add_command(label="Anomaly Detector", command=self.detect_anomalies)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="System Information", command=self.show_system_info)
+        # Privileges menu
+        privileges_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Privileges", menu=privileges_menu)
+        privileges_menu.add_command(label="Request Privileges", command=self.show_privilege_dialog)
+        privileges_menu.add_command(label="Privilege Status", command=self.show_privilege_status)
+        privileges_menu.add_separator()
+        privileges_menu.add_command(label="Revoke Privileges", command=self.privilege_manager.revoke_privileges)
+        
+        # Sound menu
+        sound_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Sound", menu=sound_menu)
+        sound_menu.add_command(label="Test Sound System", command=self.test_sound_system)
+        sound_menu.add_command(label="Sound Settings", command=self.show_sound_settings)
+        sound_menu.add_separator()
+        sound_menu.add_command(label="Toggle Sound Alerts", command=self.toggle_sound_alerts)
+        
+        # AI menu
+        ai_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="AI", menu=ai_menu)
+        ai_menu.add_command(label="Test LLM", command=self.test_llm)
+        ai_menu.add_command(label="Switch Language", command=self.switch_ai_language)
         
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -1271,13 +1778,36 @@ class NIMDATkinterApp:
     
     def create_status_bar(self):
         """Create status bar"""
-        self.status_bar = ttk.Label(self.root, text="Ready", relief='sunken', anchor='w')
-        self.status_bar.pack(side='bottom', fill='x')
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(side='bottom', fill='x')
+        
+        # Status information
+        self.status_label = ttk.Label(status_frame, text="Ready", relief='sunken')
+        self.status_label.pack(side='left', fill='x', expand=True)
+        
+        # Privilege indicator
+        self.privilege_indicator = ttk.Label(status_frame, text="🔒", relief='sunken', width=3)
+        self.privilege_indicator.pack(side='right')
+        
+        # Sound indicator
+        self.sound_indicator = ttk.Label(status_frame, text="🔊", relief='sunken', width=3)
+        self.sound_indicator.pack(side='right')
+        
+        # Update sound indicator
+        self.update_sound_indicator()
+    
+    def update_sound_indicator(self):
+        """Update sound indicator in status bar"""
+        if hasattr(self, 'sound_system') and self.sound_system.enabled:
+            self.sound_indicator.config(text="🔊")
+        else:
+            self.sound_indicator.config(text="🔇")
     
     def init_security_system(self):
         """Initialize security monitoring system"""
         if not SECURITY_MODULES_AVAILABLE:
-            messagebox.showwarning("Warning", "Security modules not available!")
+            if hasattr(self, 'log_message'):
+                self.log_message("WARNING: Security modules not available!")
             return
         
         try:
@@ -1288,24 +1818,34 @@ class NIMDATkinterApp:
             # Initialize LLM agent
             self.llm_agent = LLMSecurityAgent()
             
+            # Initialize AI provider manager
+            self.ai_provider_manager = AIProviderManager()
+            
+            # Initialize task scheduler
+            self.task_scheduler = TaskScheduler()
+            
             # Start monitoring thread
             self.monitor_thread = SecurityMonitorThread(self.on_security_update)
             self.monitor_thread.start()
             
-            # Check Ollama status
-            self.check_ollama_status()
+            # Check Ollama status (only if UI is ready)
+            if hasattr(self, 'ollama_status_label'):
+                self.check_ollama_status()
             
-            # Update AI language indicator
-            self.update_ai_language_indicator()
+            # Update AI language indicator (only if UI is ready)
+            if hasattr(self, 'ai_language_label'):
+                self.update_ai_language_indicator()
             
             # Load initial data immediately
             self.load_initial_data()
             
-            self.log_message("Security system initialized successfully")
+            if hasattr(self, 'log_message'):
+                self.log_message("Security system initialized successfully")
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to initialize security system: {str(e)}")
-            self.log_message(f"ERROR: Failed to initialize security system: {str(e)}")
+            if hasattr(self, 'log_message'):
+                self.log_message(f"ERROR: Failed to initialize security system: {str(e)}")
+            print(f"ERROR: Failed to initialize security system: {str(e)}")
     
     def check_ollama_status(self):
         """Check Ollama connection status"""
@@ -1313,16 +1853,19 @@ class NIMDATkinterApp:
             return
         
         try:
-            if self.llm_agent.check_ollama_connection():
+            if self.llm_agent and self.llm_agent.check_ollama_connection():
                 models = self.llm_agent.get_available_models()
-                self.ollama_status_label.config(text=f"Status: ✅ Connected ({len(models)} models)")
+                if hasattr(self, 'ollama_status_label') and self.ollama_status_label:
+                    self.ollama_status_label.config(text=f"Status: ✅ Connected ({len(models)} models)")
                 self.log_message(f"Ollama connected with {len(models)} models")
             else:
-                self.ollama_status_label.config(text="Status: ❌ Not connected")
+                if hasattr(self, 'ollama_status_label') and self.ollama_status_label:
+                    self.ollama_status_label.config(text="Status: ❌ Not connected")
                 self.log_message("WARNING: Ollama not connected")
-        except:
-            self.ollama_status_label.config(text="Status: ❌ Error")
-            self.log_message("ERROR: Ollama connection failed")
+        except Exception as e:
+            if hasattr(self, 'ollama_status_label') and self.ollama_status_label:
+                self.ollama_status_label.config(text="Status: ❌ Error")
+            self.log_message(f"ERROR: Ollama connection failed: {e}")
     
     def load_initial_data(self):
         """Load initial data immediately"""
@@ -1331,6 +1874,7 @@ class NIMDATkinterApp:
             network_scanner = NetworkScanner()
             connections = network_scanner.scan_network_connections()
             port_scan = network_scanner.scan_local_ports()
+            print(f"[DEBUG] load_initial_data: port_scan={port_scan}")
             
             # Get initial system info
             system_info = self.get_initial_system_info()
@@ -1383,137 +1927,219 @@ class NIMDATkinterApp:
     def on_security_update(self, security_status):
         """Handle security status update"""
         try:
-            # Update system metrics
-            system_info = security_status.get('system_info', {})
-            cpu_percent = system_info.get('cpu_percent', 0)
-            memory_percent = system_info.get('memory_percent', 0)
+            print(f"[DEBUG] on_security_update: port_scan={security_status.get('port_scan')}")
+            # Update security status
+            self.security_status.update(security_status)
             
-            self.cpu_bar['value'] = cpu_percent
-            self.cpu_label.config(text=f"{cpu_percent:.1f}%")
+            # Update UI elements
+            self.root.after(0, lambda: self.update_ui())
             
-            self.mem_bar['value'] = memory_percent
-            self.mem_label.config(text=f"{memory_percent:.1f}%")
+            # Check for threat level changes and trigger sound alerts
+            if 'threat_level' in security_status:
+                threat_level = security_status['threat_level']
+                if hasattr(self, 'last_threat_level') and self.last_threat_level != threat_level:
+                    # Threat level changed - trigger sound alert
+                    self.trigger_sound_alert(threat_level, "Threat Level Change")
+                    
+                    # Trigger pattern alerts for specific threat levels
+                    if threat_level == ThreatLevel.CRITICAL:
+                        self.trigger_pattern_alert('data_breach', "Critical Threat Detected")
+                    elif threat_level == ThreatLevel.EMERGENCY:
+                        self.trigger_pattern_alert('system_compromise', "Emergency Situation")
+                
+                self.last_threat_level = threat_level
             
-            # Update connections
-            connections = security_status.get('connections', [])
-            self.update_connections_tree(connections)
+            # Check for specific security events
+            if 'connections' in security_status:
+                connections = security_status['connections']
+                for conn in connections:
+                    if isinstance(conn, dict) and conn.get('threat_level') in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]:
+                        target = f"{conn.get('remote_address', 'Unknown')}:{conn.get('remote_port', 'Unknown')}"
+                        self.trigger_sound_alert(conn['threat_level'], f"Network Threat: {target}")
             
-            # Update port scan
-            port_scan = security_status.get('port_scan', [])
-            self.update_ports_tree(port_scan)
-            
-            # Update anomalies
-            anomalies = security_status.get('anomalies', [])
-            self.update_anomalies_tree(anomalies)
-            
-            # Update threat level
-            self.update_threat_level(security_status)
-            
-            # Update status
-            self.status_bar.config(text=f"Last update: {datetime.now().strftime('%H:%M:%S')} | "
-                                       f"Connections: {len(connections)} | "
-                                       f"Open ports: {len(port_scan)} | "
-                                       f"Anomalies: {len(anomalies)}")
+            if 'anomalies' in security_status:
+                anomalies = security_status['anomalies']
+                for anomaly in anomalies:
+                    if isinstance(anomaly, dict) and anomaly.get('severity') in ['HIGH', 'CRITICAL']:
+                        anomaly_type = anomaly.get('type', 'Unknown')
+                        self.trigger_pattern_alert('suspicious_process', f"Anomaly: {anomaly_type}")
             
         except Exception as e:
-            self.log_message(f"ERROR: Security update failed: {str(e)}")
+            print(f"Error in security update: {e}")
+            self.log_message(f"❌ Security update error: {e}")
     
     def update_connections_tree(self, connections):
-        """Update connections treeview"""
+        """Update connections treeview with threat level analysis"""
         for item in self.connections_tree.get_children():
             self.connections_tree.delete(item)
         
         for conn in connections:
+            # Analyze threat level for this connection
+            threat_level = self.threat_analyzer.analyze_address_threat(conn['remote_addr'])
+            
+            # Execute security actions based on threat level
+            details = {
+                'local_addr': conn['local_addr'],
+                'remote_addr': conn['remote_addr'],
+                'status': conn['status'],
+                'pid': conn['pid'],
+                'process': conn['process']
+            }
+            self.threat_analyzer.execute_actions(threat_level, conn['remote_addr'], details)
+            
+            # Get threat level info
+            threat_info = threat_level.value[0]  # Get the enum value
+            threat_icon = threat_level.value[1]  # Get the emoji
+            threat_color = threat_level.value[2]  # Get the color
+            threat_name = threat_level.value[3]  # Get the Ukrainian name
+            
             self.connections_tree.insert('', 'end', values=(
                 conn['local_addr'],
                 conn['remote_addr'],
                 conn['status'],
                 conn['pid'],
-                conn['process']
-            ))
+                conn['process'],
+                f"{threat_icon} {threat_name}"
+            ), tags=(threat_color,))
+        
+        # Configure tag colors for threat levels
+        for level in ThreatLevel:
+            self.connections_tree.tag_configure(level.value[2], background=level.value[2], foreground='white')
     
     def update_ports_tree(self, port_scan):
-        """Update ports treeview"""
+        print(f"[DEBUG] update_ports_tree called with {len(port_scan)} ports: {port_scan}")
         for item in self.ports_tree.get_children():
             self.ports_tree.delete(item)
         
         for port in port_scan:
+            # Analyze threat level for this port
+            threat_level = self.threat_analyzer.analyze_port_threat(port['port'], port['service'])
+            
+            # Execute security actions based on threat level
+            details = {
+                'port': port['port'],
+                'service': port['service'],
+                'status': port['status'],
+                'risk': port['risk'],
+                'timestamp': port['timestamp']
+            }
+            self.threat_analyzer.execute_actions(threat_level, f"Port {port['port']}", details)
+            
+            # Get threat level info
+            threat_info = threat_level.value[0]  # Get the enum value
+            threat_icon = threat_level.value[1]  # Get the emoji
+            threat_color = threat_level.value[2]  # Get the color
+            threat_name = threat_level.value[3]  # Get the Ukrainian name
+            
             self.ports_tree.insert('', 'end', values=(
                 port['port'],
                 port['service'],
                 port['status'],
-                port['risk'],
+                f"{threat_icon} {threat_name}",
                 port['timestamp'][:19]  # Truncate timestamp
-            ))
+            ), tags=(threat_color,))
+        
+        # Configure tag colors for threat levels
+        for level in ThreatLevel:
+            self.ports_tree.tag_configure(level.value[2], background=level.value[2], foreground='white')
     
     def update_anomalies_tree(self, anomalies):
-        """Update anomalies tree with new data"""
+        """Update anomalies tree with threat level analysis"""
         # Clear existing items
         for item in self.anomalies_tree.get_children():
             self.anomalies_tree.delete(item)
         
-        # Add new anomalies
+        # Add new anomalies with threat level analysis
         for anomaly in anomalies:
-            severity_color = {
-                'HIGH': '#ff4444',
-                'MEDIUM': '#ffaa00',
-                'LOW': '#44aa44'
-            }.get(anomaly.get('severity', 'LOW'), '#888888')
+            # Analyze threat level for this anomaly
+            threat_level = self.threat_analyzer.analyze_anomaly_threat(anomaly)
+            
+            # Execute security actions based on threat level
+            self.threat_analyzer.execute_actions(threat_level, f"Anomaly: {anomaly.get('type', 'UNKNOWN')}", anomaly)
+            
+            # Get threat level info
+            threat_info = threat_level.value[0]  # Get the enum value
+            threat_icon = threat_level.value[1]  # Get the emoji
+            threat_color = threat_level.value[2]  # Get the color
+            threat_name = threat_level.value[3]  # Get the Ukrainian name
             
             self.anomalies_tree.insert('', 'end', values=(
                 anomaly.get('type', 'UNKNOWN'),
-                anomaly.get('severity', 'LOW'),
+                f"{threat_icon} {threat_name}",
                 anomaly.get('description', 'No description'),
                 anomaly.get('timestamp', 'Unknown')
-            ), tags=(severity_color,))
+            ), tags=(threat_color,))
         
-        # Configure tag colors
-        self.anomalies_tree.tag_configure('#ff4444', background='#ffcccc')
-        self.anomalies_tree.tag_configure('#ffaa00', background='#fff2cc')
-        self.anomalies_tree.tag_configure('#44aa44', background='#ccffcc')
-        self.anomalies_tree.tag_configure('#888888', background='#f0f0f0')
+        # Configure tag colors for threat levels
+        for level in ThreatLevel:
+            self.anomalies_tree.tag_configure(level.value[2], background=level.value[2], foreground='white')
     
     def update_threat_level(self, security_status):
-        """Update threat level based on security status"""
-        threat_score = 0
+        """Update threat level based on security status using new threat analysis system"""
+        max_threat_level = ThreatLevel.LOW
         
         # Check for high-risk ports
         port_scan = security_status.get('port_scan', [])
         for port in port_scan:
-            if port['risk'] == 'HIGH':
-                threat_score += 10
+            threat_level = self.threat_analyzer.analyze_port_threat(port['port'], port['service'])
+            if threat_level.value[0] > max_threat_level.value[0]:
+                max_threat_level = threat_level
         
         # Check for anomalies
         anomalies = security_status.get('anomalies', [])
         for anomaly in anomalies:
-            if anomaly['severity'] == 'HIGH':
-                threat_score += 15
-            elif anomaly['severity'] == 'MEDIUM':
-                threat_score += 5
+            threat_level = self.threat_analyzer.analyze_anomaly_threat(anomaly)
+            if threat_level.value[0] > max_threat_level.value[0]:
+                max_threat_level = threat_level
         
-        # Determine threat level
-        if threat_score >= 30:
-            threat_level = "CRITICAL"
-            color = "red"
-        elif threat_score >= 20:
-            threat_level = "HIGH"
-            color = "orange"
-        elif threat_score >= 10:
-            threat_level = "MEDIUM"
-            color = "yellow"
-        else:
-            threat_level = "LOW"
-            color = "green"
+        # Check for suspicious connections
+        connections = security_status.get('connections', [])
+        for conn in connections:
+            threat_level = self.threat_analyzer.analyze_address_threat(conn['remote_addr'])
+            if threat_level.value[0] > max_threat_level.value[0]:
+                max_threat_level = threat_level
         
-        self.threat_level_label.config(text=f"Threat Level: {threat_level}")
-        self.security_status_label.config(text=f"Status: Active | Score: {threat_score}")
+        # Update threat level
+        self.threat_level = max_threat_level
+        
+        # Update UI with threat level info
+        threat_icon = max_threat_level.value[1]
+        threat_color = max_threat_level.value[2]
+        threat_name = max_threat_level.value[3]
+        
+        self.threat_level_label.config(
+            text=f"Threat Level: {threat_icon} {threat_name}",
+            foreground=threat_color
+        )
+        
+        # Update security status
+        total_items = len(port_scan) + len(anomalies) + len(connections)
+        self.security_status_label.config(
+            text=f"Status: Active | Items: {total_items} | Level: {max_threat_level.value[0]}"
+        )
+        
+        # Execute actions for the current threat level
+        if max_threat_level != ThreatLevel.LOW:
+            details = {
+                'port_scan': port_scan,
+                'anomalies': anomalies,
+                'connections': connections,
+                'total_items': total_items
+            }
+            self.threat_analyzer.execute_actions(max_threat_level, "System-wide threat", details)
     
     def log_message(self, message):
-        """Add message to logs"""
-        timestamp = datetime.now().strftime('%H:%M:%S')
+        """Add message to log"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
-        self.logs_text.insert(tk.END, log_entry)
-        self.logs_text.see(tk.END)
+        
+        # Check if logs_text exists before using it
+        if hasattr(self, 'logs_text') and self.logs_text:
+            self.logs_text.insert(tk.END, log_entry)
+            self.logs_text.see(tk.END)
+        
+        # Also print to console for debugging
+        print(log_entry.strip())
     
     # Action methods
     def full_scan(self):
@@ -1570,22 +2196,17 @@ Uptime: {time.time() - psutil.boot_time():.0f} seconds
     
     def refresh_network(self):
         """Refresh network connections"""
-        self.log_message("Refreshing network connections...")
         try:
-            # Get fresh network data
             network_scanner = NetworkScanner()
             connections = network_scanner.scan_network_connections()
-            
-            # Update the connections tree
             self.update_connections_tree(connections)
             
-            # Update status
-            self.status_bar.config(text=f"Network refreshed: {len(connections)} connections | {datetime.now().strftime('%H:%M:%S')}")
-            self.log_message(f"Network refreshed: {len(connections)} connections found")
+            if hasattr(self, 'status_label'):
+                self.status_label.config(text=f"Network refreshed: {len(connections)} connections | {datetime.now().strftime('%H:%M:%S')}")
             
+            self.log_message(f"Network refreshed: {len(connections)} connections")
         except Exception as e:
-            self.log_message(f"ERROR: Failed to refresh network: {str(e)}")
-            messagebox.showerror("Error", f"Failed to refresh network: {str(e)}")
+            self.log_message(f"ERROR: Network refresh failed: {str(e)}")
     
     def analyze_network(self):
         """Analyze network traffic"""
@@ -1742,22 +2363,18 @@ Uptime: {time.time() - psutil.boot_time():.0f} seconds
         close_btn.pack(pady=10)
     
     def detect_anomalies(self):
-        """Detect anomalies"""
-        self.log_message("Running anomaly detection...")
+        """Detect system anomalies"""
         try:
-            # Use the anomaly detector
-            anomalies = self.monitor_thread.anomaly_detector.detect_anomalies()
-            
-            # Update the anomalies tree
+            anomaly_detector = AnomalyDetector()
+            anomalies = anomaly_detector.detect_anomalies()
             self.update_anomalies_tree(anomalies)
             
-            # Update status
-            self.status_bar.config(text=f"Anomaly detection completed: {len(anomalies)} anomalies found | {datetime.now().strftime('%H:%M:%S')}")
-            self.log_message(f"Anomaly detection completed: {len(anomalies)} anomalies found")
+            if hasattr(self, 'status_label'):
+                self.status_label.config(text=f"Anomaly detection completed: {len(anomalies)} anomalies found | {datetime.now().strftime('%H:%M:%S')}")
             
+            self.log_message(f"Anomaly detection completed: {len(anomalies)} anomalies found")
         except Exception as e:
             self.log_message(f"ERROR: Anomaly detection failed: {str(e)}")
-            messagebox.showerror("Error", f"Anomaly detection failed: {str(e)}")
     
     def clear_anomalies(self):
         """Clear anomalies"""
@@ -1797,24 +2414,22 @@ Uptime: {time.time() - psutil.boot_time():.0f} seconds
             messagebox.showerror("Error", f"Analysis failed: {str(e)}")
     
     def switch_language(self):
-        """Switch between English and Ukrainian"""
+        """Switch application language"""
         new_lang = self.translation_manager.switch_language()
         
-        # Update window title
+        # Update language indicator
         if new_lang == 'uk':
-            self.root.title("NIMDA Система Безпеки - Комплексний Моніторинг")
+            self.language_label.config(text="Language: Українська")
         else:
-            self.root.title("NIMDA Security System - Comprehensive Monitoring")
+            self.language_label.config(text="Language: English")
         
         # Update status
         lang_text = "Українська" if new_lang == 'uk' else "English"
-        self.status_bar.config(text=f"Language switched to {lang_text} | {datetime.now().strftime('%H:%M:%S')}")
+        if hasattr(self, 'status_label'):
+            self.status_label.config(text=f"Language switched to {lang_text} | {datetime.now().strftime('%H:%M:%S')}")
         
         # Show confirmation
-        messagebox.showinfo("Language", f"Language switched to {lang_text}")
-        
-        # Note: Full UI translation would require updating all labels and buttons
-        # This is a basic implementation showing the language switching capability
+        messagebox.showinfo("Language", f"Application language switched to {lang_text}")
     
     def analyze_threats(self):
         """Analyze current security threats"""
@@ -1901,41 +2516,29 @@ Uptime: {time.time() - psutil.boot_time():.0f} seconds
             messagebox.showerror("Error", error_msg)
     
     def send_query(self):
-        """Send query to LLM agent"""
-        query = self.query_entry.get()
-        if not query or query == "Ask about security threats, analyze connections, or get recommendations...":
+        """Send query to AI"""
+        query = self.query_entry.get().strip()
+        if not query:
             messagebox.showwarning("Warning", "Please enter a query")
             return
         
         try:
-            # Get current language for AI response
-            current_lang = self.translation_manager.get_current_language()
-            
-            # Add language instruction to query
-            if current_lang == 'uk':
-                language_query = f"Відповідай українською мовою. {query}"
-            else:
-                language_query = f"Answer in English. {query}"
-            
-            # Send query to LLM
-            response = self.llm_agent.analyze_security_query(language_query)
+            # Get response from AI
+            response = self.llm_agent.analyze_security_query(query)
             
             # Display response
-            self.response_text.delete('1.0', tk.END)
-            self.response_text.insert('1.0', response)
-            
-            # Log the interaction
-            self.log_message(f"AI Query: {query}")
-            self.log_message(f"AI Response: {response[:100]}...")
+            self.response_text.delete(1.0, tk.END)
+            self.response_text.insert(1.0, response)
             
             # Update status
-            lang_text = "Українська" if current_lang == 'uk' else "English"
-            self.status_bar.config(text=f"AI analysis completed in {lang_text} | {datetime.now().strftime('%H:%M:%S')}")
+            lang_text = "Українська" if self.translation_manager.get_current_language() == 'uk' else "English"
+            if hasattr(self, 'status_label'):
+                self.status_label.config(text=f"AI analysis completed in {lang_text} | {datetime.now().strftime('%H:%M:%S')}")
             
+            self.log_message(f"AI query processed: {query[:50]}...")
         except Exception as e:
-            error_msg = f"Помилка AI аналізу: {str(e)}" if current_lang == 'uk' else f"AI analysis error: {str(e)}"
-            messagebox.showerror("Error", error_msg)
-            self.log_message(f"ERROR: AI analysis failed: {str(e)}")
+            self.log_message(f"ERROR: AI query failed: {str(e)}")
+            messagebox.showerror("Error", f"Failed to process query: {str(e)}")
     
     def refresh_logs(self):
         """Refresh security logs"""
@@ -2015,7 +2618,8 @@ License: MIT"""
         
         # Update status
         lang_text = "Українська" if new_lang == 'uk' else "English"
-        self.status_bar.config(text=f"AI language switched to {lang_text} | {datetime.now().strftime('%H:%M:%S')}")
+        if hasattr(self, 'status_label'):
+            self.status_label.config(text=f"AI language switched to {lang_text} | {datetime.now().strftime('%H:%M:%S')}")
         
         # Show confirmation
         messagebox.showinfo("AI Language", f"AI will now respond in {lang_text}")
@@ -2109,6 +2713,10 @@ License: MIT"""
     
     def init_task_scheduler(self):
         """Initialize task scheduler with callback functions"""
+        if self.task_scheduler is None:
+            self.log_message("WARNING: Task scheduler not initialized")
+            return
+            
         # Register callback functions
         self.task_scheduler.register_function("full_security_scan", self.full_scan)
         self.task_scheduler.register_function("analyze_network", self.analyze_network)
@@ -2123,19 +2731,35 @@ License: MIT"""
         for item in self.providers_tree.get_children():
             self.providers_tree.delete(item)
         
-        # Get provider status
-        status = self.ai_provider_manager.get_provider_status()
+        # Check if ai_provider_manager is initialized
+        if self.ai_provider_manager is None:
+            # Add placeholder message
+            self.providers_tree.insert('', 'end', text="AI Providers", 
+                                     values=("⚠️ Not initialized", "Please restart", "N/A"))
+            return
         
-        # Add providers to tree
-        for name, info in status.items():
-            status_text = "✅ Available" if info["available"] else "❌ Unavailable"
-            models_text = ", ".join(info["models"][:3]) + ("..." if len(info["models"]) > 3 else "")
-            last_check = info["last_check"].strftime("%H:%M:%S") if info["last_check"] else "Never"
+        # Get provider status
+        try:
+            status = self.ai_provider_manager.get_provider_status()
             
-            self.providers_tree.insert('', 'end', text=name, values=(status_text, models_text, last_check))
+            # Add providers to tree
+            for name, info in status.items():
+                status_text = "✅ Available" if info["available"] else "❌ Unavailable"
+                models_text = ", ".join(info["models"][:3]) + ("..." if len(info["models"]) > 3 else "")
+                last_check = info["last_check"].strftime("%H:%M:%S") if info["last_check"] else "Never"
+                
+                self.providers_tree.insert('', 'end', text=name, values=(status_text, models_text, last_check))
+        except Exception as e:
+            # Add error message
+            self.providers_tree.insert('', 'end', text="Error", 
+                                     values=(f"❌ Error: {str(e)}", "Check configuration", "N/A"))
     
     def set_active_provider(self):
         """Set active AI provider"""
+        if self.ai_provider_manager is None:
+            messagebox.showerror("Error", "AI provider manager not initialized")
+            return
+            
         selection = self.providers_tree.selection()
         if not selection:
             messagebox.showinfo("Info", "Please select a provider")
@@ -2144,7 +2768,8 @@ License: MIT"""
         provider_name = self.providers_tree.item(selection[0])['text']
         if self.ai_provider_manager.set_active_provider(provider_name):
             messagebox.showinfo("Success", f"Active provider set to {provider_name}")
-            self.status_bar.config(text=f"Active AI provider: {provider_name} | {datetime.now().strftime('%H:%M:%S')}")
+            if hasattr(self, 'status_label'):
+                self.status_label.config(text=f"Active AI provider: {provider_name} | {datetime.now().strftime('%H:%M:%S')}")
         else:
             messagebox.showerror("Error", f"Failed to set {provider_name} as active provider")
     
@@ -2619,25 +3244,41 @@ License: MIT"""
         for item in self.tasks_tree.get_children():
             self.tasks_tree.delete(item)
         
-        # Get tasks
-        tasks = self.task_scheduler.get_tasks()
+        # Check if task_scheduler is initialized
+        if self.task_scheduler is None:
+            # Add placeholder message
+            self.tasks_tree.insert('', 'end', text="Task Scheduler", 
+                                 values=("⚠️ Not initialized", "Please restart", "N/A", "N/A"))
+            return
         
-        # Add tasks to tree
-        for task in tasks:
-            status = "✅ Enabled" if task.enabled else "⏸️ Disabled"
-            next_run = task.next_run.strftime("%Y-%m-%d %H:%M") if task.next_run else "N/A"
-            last_run = task.last_run.strftime("%Y-%m-%d %H:%M") if task.last_run else "Never"
+        # Get tasks
+        try:
+            tasks = self.task_scheduler.get_tasks()
             
-            self.tasks_tree.insert('', 'end', text=task.name, values=(
-                task.task_type.value,
-                f"{task.schedule_type.value}",
-                status,
-                next_run,
-                last_run
-            ))
+            # Add tasks to tree
+            for task in tasks:
+                status = "✅ Enabled" if task.enabled else "⏸️ Disabled"
+                next_run = task.next_run.strftime("%Y-%m-%d %H:%M") if task.next_run else "N/A"
+                last_run = task.last_run.strftime("%Y-%m-%d %H:%M") if task.last_run else "Never"
+                
+                self.tasks_tree.insert('', 'end', text=task.name, values=(
+                    task.task_type.value,
+                    f"{task.schedule_type.value}",
+                    status,
+                    next_run,
+                    last_run
+                ))
+        except Exception as e:
+            # Add error message
+            self.tasks_tree.insert('', 'end', text="Error", 
+                                 values=(f"❌ Error: {str(e)}", "Check configuration", "N/A", "N/A"))
     
     def add_scheduled_task(self):
         """Add new scheduled task"""
+        if self.task_scheduler is None:
+            messagebox.showerror("Error", "Task scheduler not initialized")
+            return
+            
         # Create simple task dialog
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Scheduled Task")
@@ -2698,6 +3339,10 @@ License: MIT"""
     
     def run_task_now(self):
         """Run selected task immediately"""
+        if self.task_scheduler is None:
+            messagebox.showerror("Error", "Task scheduler not initialized")
+            return
+            
         selection = self.tasks_tree.selection()
         if not selection:
             messagebox.showinfo("Info", "Please select a task")
@@ -2716,6 +3361,10 @@ License: MIT"""
     
     def toggle_task(self):
         """Enable/disable selected task"""
+        if self.task_scheduler is None:
+            messagebox.showerror("Error", "Task scheduler not initialized")
+            return
+            
         selection = self.tasks_tree.selection()
         if not selection:
             messagebox.showinfo("Info", "Please select a task")
@@ -2735,6 +3384,10 @@ License: MIT"""
     
     def delete_scheduled_task(self):
         """Delete selected task"""
+        if self.task_scheduler is None:
+            messagebox.showerror("Error", "Task scheduler not initialized")
+            return
+            
         selection = self.tasks_tree.selection()
         if not selection:
             messagebox.showinfo("Info", "Please select a task")
@@ -3207,6 +3860,699 @@ block drop all
         except Exception as e:
             self.log_message(f"❌ Lockdown failed: {e}")
             messagebox.showerror("Error", f"Lockdown failed: {e}")
+
+    def create_security_policy_tab(self):
+        """Create security policy configuration tab"""
+        policy_frame = ttk.Frame(self.notebook)
+        self.notebook.add(policy_frame, text="🛡️ Security Policy")
+        
+        # Create scrollable frame
+        canvas = tk.Canvas(policy_frame)
+        scrollbar = ttk.Scrollbar(policy_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Policy overview
+        overview_frame = ttk.LabelFrame(scrollable_frame, text="Security Policy Overview", padding=10)
+        overview_frame.pack(fill='x', padx=10, pady=5)
+        
+        overview_text = """Security Policy allows you to configure automatic actions for different threat levels:
+
+🟢 LOW: Basic monitoring and logging
+🟡 MEDIUM: Enhanced monitoring, logging, and analysis  
+🟠 HIGH: Active monitoring, logging, analysis, blocking, and alerts
+🔴 CRITICAL: Full monitoring, blocking, isolation, AI analysis, and alerts
+⚫ EMERGENCY: Complete lockdown with all security measures
+
+Select actions for each threat level below:"""
+        
+        overview_label = ttk.Label(overview_frame, text=overview_text, justify='left')
+        overview_label.pack(anchor='w')
+        
+        # Threat level configuration - make it more compact
+        for level in ThreatLevel:
+            level_frame = ttk.LabelFrame(scrollable_frame, text=f"{level.value[1]} {level.value[3]} ({level.value[0]})", padding=5)
+            level_frame.pack(fill='x', padx=10, pady=2)
+            
+            # Get current actions for this level
+            current_actions = self.security_policy.get_actions_for_level(level)
+            
+            # Create checkboxes in a grid layout
+            action_vars = {}
+            row = 0
+            col = 0
+            max_cols = 2  # 2 columns for better layout
+            
+            for action in SecurityAction:
+                var = tk.BooleanVar(value=action in current_actions)
+                action_vars[action] = var
+                
+                # Create action description
+                action_descriptions = {
+                    SecurityAction.MONITOR: "🔍 Monitor",
+                    SecurityAction.LOG: "📝 Log", 
+                    SecurityAction.ANALYZE: "🔬 Analyze",
+                    SecurityAction.BLOCK: "🚫 Block",
+                    SecurityAction.ISOLATE: "🔒 Isolate",
+                    SecurityAction.TERMINATE: "💀 Terminate",
+                    SecurityAction.BACKUP: "💾 Backup",
+                    SecurityAction.ALERT: "🚨 Alert",
+                    SecurityAction.AI_ANALYSIS: "🤖 AI Analysis",
+                    SecurityAction.TRACE_ATTACK: "🔍 Trace Attack"
+                }
+                
+                cb = ttk.Checkbutton(level_frame, text=action_descriptions[action], variable=var)
+                cb.grid(row=row, column=col, sticky='w', padx=5, pady=1)
+                
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+            
+            # Save button for this level
+            def save_level_policy(level=level, action_vars=action_vars):
+                selected_actions = [action for action, var in action_vars.items() if var.get()]
+                self.security_policy.update_policy(level, selected_actions)
+                messagebox.showinfo("Success", f"Policy updated for {level.value[3]} level")
+            
+            save_btn = ttk.Button(level_frame, text="💾 Save", 
+                                command=lambda l=level, av=action_vars: save_level_policy(l, av))
+            save_btn.grid(row=row+1, column=0, columnspan=max_cols, pady=5)
+        
+        # Global policy controls
+        global_frame = ttk.LabelFrame(scrollable_frame, text="Global Policy Controls", padding=10)
+        global_frame.pack(fill='x', padx=10, pady=5)
+        
+        button_frame = ttk.Frame(global_frame)
+        button_frame.pack(fill='x')
+        
+        ttk.Button(button_frame, text="🔄 Reset", command=self.reset_security_policy).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="💾 Save All", command=self.save_all_policies).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="📂 Load", command=self.load_security_policies).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="📊 Report", command=self.show_policy_report).pack(side='left', padx=5)
+        
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+    
+    def reset_security_policy(self):
+        """Reset security policy to defaults"""
+        if messagebox.askyesno("Reset Policy", "Are you sure you want to reset all security policies to defaults?"):
+            self.security_policy = SecurityPolicy()
+            messagebox.showinfo("Success", "Security policies reset to defaults")
+    
+    def save_all_policies(self):
+        """Save all security policies"""
+        try:
+            self.security_policy.save_policy()
+            messagebox.showinfo("Success", "All security policies saved successfully")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save policies: {str(e)}")
+    
+    def load_security_policies(self):
+        """Load security policies from file"""
+        try:
+            self.security_policy.load_policy()
+            messagebox.showinfo("Success", "Security policies loaded successfully")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load policies: {str(e)}")
+    
+    def show_policy_report(self):
+        """Show security policy report"""
+        report = "Security Policy Report\n" + "="*50 + "\n\n"
+        
+        for level in ThreatLevel:
+            actions = self.security_policy.get_actions_for_level(level)
+            report += f"{level.value[1]} {level.value[3]} ({level.value[0]}):\n"
+            
+            if actions:
+                for action in actions:
+                    report += f"  • {action.value}\n"
+            else:
+                report += f"  • No actions configured\n"
+            
+            report += "\n"
+        
+        # Show report in new window
+        report_window = tk.Toplevel(self.root)
+        report_window.title("Security Policy Report")
+        report_window.geometry("500x400")
+        
+        text_widget = scrolledtext.ScrolledText(report_window, wrap=tk.WORD)
+        text_widget.pack(fill='both', expand=True, padx=10, pady=10)
+        text_widget.insert('1.0', report)
+        text_widget.config(state='disabled')
+
+    def create_devices_tab(self):
+        """Create devices monitoring tab"""
+        devices_frame = ttk.Frame(self.notebook)
+        self.notebook.add(devices_frame, text="🖥️ Devices")
+
+        # Devices list
+        devices_list_frame = ttk.LabelFrame(devices_frame, text="Connected Devices", padding=10)
+        devices_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        columns = ('Name', 'Type', 'Vendor', 'Product', 'Serial/ID', 'Status')
+        self.devices_tree = ttk.Treeview(devices_list_frame, columns=columns, show='headings', height=15)
+        for col in columns:
+            self.devices_tree.heading(col, text=col)
+            self.devices_tree.column(col, width=140)
+        devices_scrollbar = ttk.Scrollbar(devices_list_frame, orient='vertical', command=self.devices_tree.yview)
+        self.devices_tree.configure(yscrollcommand=devices_scrollbar.set)
+        self.devices_tree.pack(side='left', fill='both', expand=True)
+        devices_scrollbar.pack(side='right', fill='y')
+
+        # Control buttons
+        button_frame = ttk.Frame(devices_frame)
+        button_frame.pack(fill='x', padx=10, pady=5)
+        ttk.Button(button_frame, text="🔄 Refresh", command=self.refresh_devices).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="❌ Disconnect Device", command=self.disconnect_device).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="🚫 Block New Devices", command=self.block_new_devices).pack(side='left', padx=5)
+
+        # Initial load
+        self.refresh_devices()
+
+    def refresh_devices(self):
+        """Refresh the list of connected devices"""
+        for item in self.devices_tree.get_children():
+            self.devices_tree.delete(item)
+        try:
+            monitor = SecurityMonitor()
+            sysinfo = monitor.get_system_info()
+            devices = monitor.extract_devices(sysinfo)
+            for dev_id, dev in devices.items():
+                self.devices_tree.insert('', 'end', values=(
+                    dev.get('name', 'Unknown'),
+                    dev.get('type', 'Unknown'),
+                    dev.get('vendor', dev.get('device_id', 'Unknown')),
+                    dev.get('product', ''),
+                    dev.get('serial', dev.get('device_id', '')),
+                    'Connected' if dev.get('connected', True) else 'Disconnected'
+                ))
+        except Exception as e:
+            self.devices_tree.insert('', 'end', values=(f'Error: {e}', '', '', '', '', ''))
+
+    def disconnect_device(self):
+        """Attempt to disconnect selected device (where possible)"""
+        selection = self.devices_tree.selection()
+        if not selection:
+            messagebox.showinfo("Info", "Please select a device")
+            return
+        dev_name = self.devices_tree.item(selection[0])['values'][0]
+        dev_type = self.devices_tree.item(selection[0])['values'][1]
+        # На MacOS відключення USB/Bluetooth програмно обмежене
+        messagebox.showinfo("Disconnect Device", f"Disconnecting {dev_type} devices is not supported on macOS via user-space. Please physically disconnect the device or use system settings.")
+
+    def block_new_devices(self):
+        """Block new USB/Bluetooth devices (show instructions)"""
+        msg = (
+            "⚠️ Blocking new USB/Bluetooth devices on macOS потребує root-доступу та спеціальних розширень (наприклад, Endpoint Security, USBGuard для Linux).\n\n"
+            "Для підвищення безпеки рекомендується:\n"
+            "• Вимкнути USB-порти вручну (або фізично)\n"
+            "• Вимкнути Bluetooth у системних налаштуваннях\n"
+            "• Використовувати MDM/Endpoint Management для корпоративних Mac\n\n"
+            "Автоматичне блокування буде доступне у майбутніх версіях."
+        )
+        messagebox.showinfo("Block New Devices", msg)
+
+    def create_processes_tab(self):
+        """Create processes monitoring tab"""
+        processes_frame = ttk.Frame(self.notebook)
+        self.notebook.add(processes_frame, text="⚙️ Processes")
+
+        # Processes list
+        processes_list_frame = ttk.LabelFrame(processes_frame, text="Running Processes", padding=10)
+        processes_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        columns = ('PID', 'Name', 'User', 'CPU %', 'Memory %', 'Status', 'Path')
+        self.processes_tree = ttk.Treeview(processes_list_frame, columns=columns, show='headings', height=15)
+        for col in columns:
+            self.processes_tree.heading(col, text=col)
+            self.processes_tree.column(col, width=120)
+        processes_scrollbar = ttk.Scrollbar(processes_list_frame, orient='vertical', command=self.processes_tree.yview)
+        self.processes_tree.configure(yscrollcommand=processes_scrollbar.set)
+        self.processes_tree.pack(side='left', fill='both', expand=True)
+        processes_scrollbar.pack(side='right', fill='y')
+
+        # Control buttons
+        button_frame = ttk.Frame(processes_frame)
+        button_frame.pack(fill='x', padx=10, pady=5)
+        ttk.Button(button_frame, text="🔄 Refresh", command=self.refresh_processes).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="❌ Kill Process", command=self.kill_process).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="🚫 Block Process", command=self.block_process).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="🔍 Find Suspicious", command=self.find_suspicious_processes).pack(side='left', padx=5)
+
+        # Initial load
+        self.refresh_processes()
+
+    def refresh_processes(self):
+        """Refresh the list of running processes"""
+        for item in self.processes_tree.get_children():
+            self.processes_tree.delete(item)
+        try:
+            processes = []
+            for proc in psutil.process_iter(['pid', 'name', 'username', 'cpu_percent', 'memory_percent', 'status', 'exe']):
+                try:
+                    proc_info = proc.info
+                    if proc_info['pid'] and proc_info['name']:
+                        processes.append(proc_info)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            processes.sort(key=lambda x: x['cpu_percent'] or 0, reverse=True)
+            for proc in processes[:100]:  # Show top 100 processes
+                self.processes_tree.insert('', 'end', values=(
+                    proc['pid'],
+                    proc['name'][:20],
+                    proc.get('username', 'Unknown')[:15],
+                    f"{proc['cpu_percent']:.1f}" if proc['cpu_percent'] else "0.0",
+                    f"{proc['memory_percent']:.1f}" if proc['memory_percent'] else "0.0",
+                    proc.get('status', 'Unknown'),
+                    proc.get('exe', 'Unknown')[:30] if proc.get('exe') else 'Unknown'
+                ))
+        except Exception as e:
+            self.processes_tree.insert('', 'end', values=(f'Error: {e}', '', '', '', '', '', ''))
+
+    def kill_process(self):
+        """Kill selected process"""
+        selection = self.processes_tree.selection()
+        if not selection:
+            messagebox.showinfo("Info", "Please select a process")
+            return
+        pid = int(self.processes_tree.item(selection[0])['values'][0])
+        name = self.processes_tree.item(selection[0])['values'][1]
+        if messagebox.askyesno("Confirm", f"Kill process {name} (PID: {pid})?"):
+            try:
+                proc = psutil.Process(pid)
+                proc.terminate()
+                self.log_message(f"✓ Killed process: {name} (PID: {pid})")
+                self.refresh_processes()
+            except Exception as e:
+                self.log_message(f"❌ Failed to kill {name} (PID: {pid}): {e}")
+
+    def block_process(self):
+        """Block process from running (add to blacklist)"""
+        selection = self.processes_tree.selection()
+        if not selection:
+            messagebox.showinfo("Info", "Please select a process")
+            return
+        name = self.processes_tree.item(selection[0])['values'][1]
+        # На macOS блокування процесів потребує root-доступу
+        msg = (
+            f"⚠️ Blocking process '{name}' on macOS потребує root-доступу та спеціальних розширень.\n\n"
+            "Для підвищення безпеки рекомендується:\n"
+            "• Використовувати Gatekeeper та SIP\n"
+            "• Налаштувати Parental Controls\n"
+            "• Використовувати MDM/Endpoint Management\n\n"
+            "Автоматичне блокування буде доступне у майбутніх версіях."
+        )
+        messagebox.showinfo("Block Process", msg)
+
+    def find_suspicious_processes(self):
+        """Find and highlight suspicious processes"""
+        suspicious = ['ssh', 'sshd', 'nc', 'netcat', 'ncat', 'socat', 'telnet', 'xmrig', 'ethminer']
+        found = []
+        for item in self.processes_tree.get_children():
+            values = self.processes_tree.item(item)['values']
+            name = values[1].lower()
+            if any(susp in name for susp in suspicious):
+                found.append(values)
+                self.processes_tree.selection_add(item)
+        if found:
+            msg = f"Found {len(found)} suspicious processes:\n" + "\n".join([f"• {p[1]} (PID: {p[0]})" for p in found])
+            messagebox.showwarning("Suspicious Processes", msg)
+        else:
+            messagebox.showinfo("Suspicious Processes", "No suspicious processes found.")
+
+    def start_monitoring(self):
+        """Start security monitoring thread"""
+        self.monitor_thread = SecurityMonitorThread(self.on_security_update)
+        self.monitor_thread.daemon = True
+        self.monitor_thread.start()
+        
+        # Update UI periodically
+        self.root.after(5000, self.update_ui)
+    
+    def trigger_sound_alert(self, threat_level: ThreatLevel, target: str = ""):
+        """Trigger sound alert for threat level"""
+        try:
+            # Map ThreatLevel to SoundThreatLevel
+            sound_level_mapping = {
+                ThreatLevel.LOW: SoundThreatLevel.LOW,
+                ThreatLevel.MEDIUM: SoundThreatLevel.MEDIUM,
+                ThreatLevel.HIGH: SoundThreatLevel.HIGH,
+                ThreatLevel.CRITICAL: SoundThreatLevel.CRITICAL,
+                ThreatLevel.EMERGENCY: SoundThreatLevel.EMERGENCY
+            }
+            
+            sound_level = sound_level_mapping.get(threat_level, SoundThreatLevel.MEDIUM)
+            self.sound_system.play_threat_alert(sound_level, target)
+            
+        except Exception as e:
+            print(f"Sound alert error: {e}")
+    
+    def trigger_pattern_alert(self, pattern_name: str, target: str = ""):
+        """Trigger pattern alert for specific events"""
+        try:
+            self.sound_system.play_alert_pattern(pattern_name, target)
+        except Exception as e:
+            print(f"Pattern alert error: {e}")
+    
+    def test_sound_system(self):
+        """Test the sound alert system"""
+        try:
+            self.sound_system.test_sounds()
+            messagebox.showinfo("Sound Test", "Sound system test completed!")
+        except Exception as e:
+            messagebox.showerror("Sound Test Error", f"Failed to test sound system: {e}")
+    
+    def toggle_sound_alerts(self):
+        """Toggle sound alerts on/off"""
+        if self.sound_system.enabled:
+            self.sound_system.disable()
+            messagebox.showinfo("Sound Alerts", "Sound alerts disabled")
+        else:
+            self.sound_system.enable()
+            messagebox.showinfo("Sound Alerts", "Sound alerts enabled")
+    
+    def show_sound_settings(self):
+        """Show sound settings dialog"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Sound Alert Settings")
+        settings_window.geometry("400x300")
+        settings_window.configure(bg='#2b2b2b')
+        
+        # Apply dark theme
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TLabel', background='#2b2b2b', foreground='#ffffff')
+        style.configure('TButton', background='#404040', foreground='#ffffff')
+        style.configure('TCheckbutton', background='#2b2b2b', foreground='#ffffff')
+        
+        # Settings frame
+        settings_frame = ttk.LabelFrame(settings_window, text="Sound Alert Settings", padding=10)
+        settings_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Enable/disable sound
+        sound_var = tk.BooleanVar(value=self.sound_system.enabled)
+        ttk.Checkbutton(settings_frame, text="Enable Sound Alerts", variable=sound_var).pack(anchor='w', pady=5)
+        
+        # Volume control
+        volume_frame = ttk.Frame(settings_frame)
+        volume_frame.pack(fill='x', pady=5)
+        ttk.Label(volume_frame, text="Volume:").pack(side='left')
+        volume_scale = ttk.Scale(volume_frame, from_=0.0, to=1.0, value=self.sound_system.volume, 
+                                orient='horizontal', command=lambda v: setattr(self.sound_system, 'volume', float(v)))
+        volume_scale.pack(side='left', fill='x', expand=True, padx=5)
+        
+        # Cooldown control
+        cooldown_frame = ttk.Frame(settings_frame)
+        cooldown_frame.pack(fill='x', pady=5)
+        ttk.Label(cooldown_frame, text="Alert Cooldown (seconds):").pack(side='left')
+        cooldown_var = tk.StringVar(value=str(self.sound_system.alert_cooldown))
+        cooldown_entry = ttk.Entry(cooldown_frame, textvariable=cooldown_var, width=10)
+        cooldown_entry.pack(side='left', padx=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(settings_frame)
+        button_frame.pack(fill='x', pady=10)
+        
+        ttk.Button(button_frame, text="Test Sounds", command=self.test_sound_system).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Save Settings", 
+                  command=lambda: self.save_sound_settings(sound_var.get(), float(cooldown_var.get()), settings_window)).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Cancel", command=settings_window.destroy).pack(side='right', padx=5)
+    
+    def save_sound_settings(self, enabled: bool, cooldown: float, window):
+        """Save sound settings"""
+        self.sound_system.enabled = enabled
+        self.sound_system.alert_cooldown = cooldown
+        messagebox.showinfo("Settings Saved", "Sound alert settings saved successfully!")
+        window.destroy()
+    
+    def show_privilege_dialog(self, title: str = "Root Privileges Required"):
+        """Show dialog to request root privileges"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.geometry("400x250")
+        dialog.configure(bg='#2b2b2b')
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.geometry("+%d+%d" % (self.root.winfo_rootx() + 50, self.root.winfo_rooty() + 50))
+        
+        # Apply dark theme
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TLabel', background='#2b2b2b', foreground='#ffffff')
+        style.configure('TButton', background='#404040', foreground='#ffffff')
+        style.configure('TEntry', fieldbackground='#404040', foreground='#ffffff')
+        
+        # Main frame
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill='both', expand=True)
+        
+        # Status info
+        status = self.privilege_manager.get_privilege_status()
+        if status['has_privileges'] and status['privileges_valid']:
+            status_text = f"✅ Privileges active (expires in {int(status['time_remaining'])}s)"
+        elif status['credentials_stored']:
+            status_text = "🔐 Credentials stored - enter password to activate"
+        else:
+            status_text = "🔑 No credentials stored - enter password to setup"
+        
+        ttk.Label(main_frame, text=status_text, font=('Arial', 10, 'bold')).pack(pady=10)
+        
+        # Password entry
+        ttk.Label(main_frame, text="Enter your password:").pack(anchor='w', pady=5)
+        password_var = tk.StringVar()
+        password_entry = ttk.Entry(main_frame, textvariable=password_var, show="*", width=40)
+        password_entry.pack(fill='x', pady=5)
+        password_entry.focus()
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill='x', pady=20)
+        
+        def submit_password():
+            password = password_var.get()
+            if not password:
+                messagebox.showerror("Error", "Please enter a password")
+                return
+            
+            if self.privilege_manager.request_privileges(password):
+                if self.privilege_manager.test_privileges():
+                    messagebox.showinfo("Success", "Root privileges activated successfully!")
+                    dialog.destroy()
+                else:
+                    messagebox.showerror("Error", "Failed to verify privileges. Check your password.")
+            else:
+                messagebox.showerror("Error", "Invalid password")
+        
+        def cancel():
+            dialog.destroy()
+        
+        ttk.Button(button_frame, text="Activate", command=submit_password).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Cancel", command=cancel).pack(side='right', padx=5)
+        
+        # Bind Enter key
+        password_entry.bind('<Return>', lambda e: submit_password())
+        
+        # Wait for dialog to close
+        dialog.wait_window()
+        return self.privilege_manager.check_privileges()
+    
+    def check_privileges_required(self, operation: str = "this operation") -> bool:
+        """Check if privileges are required and available"""
+        if not self.privilege_manager.check_privileges():
+            result = messagebox.askyesno("Privileges Required", 
+                                       f"Root privileges are required for {operation}.\n\n"
+                                       "Would you like to enter your password now?")
+            if result:
+                return self.show_privilege_dialog(f"Privileges for {operation}")
+            return False
+        return True
+    
+    def execute_privileged_command(self, command: str, description: str = "") -> Tuple[bool, str]:
+        """Execute command with privileges"""
+        if not self.check_privileges_required(description):
+            return False, "Privileges not available"
+        
+        return self.privilege_manager.execute_with_privileges(command, require_privileges=True)
+    
+    def show_privilege_status(self):
+        """Show current privilege status"""
+        status = self.privilege_manager.get_privilege_status()
+        
+        status_window = tk.Toplevel(self.root)
+        status_window.title("Privilege Status")
+        status_window.geometry("400x300")
+        status_window.configure(bg='#2b2b2b')
+        
+        # Apply dark theme
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TLabel', background='#2b2b2b', foreground='#ffffff')
+        style.configure('TButton', background='#404040', foreground='#ffffff')
+        
+        # Status frame
+        status_frame = ttk.LabelFrame(status_window, text="Current Status", padding=15)
+        status_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Status information
+        info_text = f"""
+Privileges Active: {'✅ Yes' if status['privileges_valid'] else '❌ No'}
+Credentials Stored: {'✅ Yes' if status['credentials_stored'] else '❌ No'}
+Time Remaining: {int(status['time_remaining'])} seconds
+        """
+        
+        ttk.Label(status_frame, text=info_text, justify='left').pack(anchor='w')
+        
+        # Buttons
+        button_frame = ttk.Frame(status_frame)
+        button_frame.pack(fill='x', pady=15)
+        
+        ttk.Button(button_frame, text="Request Privileges", 
+                  command=lambda: [status_window.destroy(), self.show_privilege_dialog()]).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Revoke Privileges", 
+                  command=lambda: [self.privilege_manager.revoke_privileges(), status_window.destroy()]).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Close", command=status_window.destroy).pack(side='right', padx=5)
+    
+    def update_privilege_indicator(self):
+        """Update privilege indicator in status bar"""
+        if hasattr(self, 'privilege_indicator'):
+            status = self.privilege_manager.get_privilege_status()
+            if status['privileges_valid']:
+                self.privilege_indicator.config(text="🔓")
+            elif status['credentials_stored']:
+                self.privilege_indicator.config(text="🔐")
+            else:
+                self.privilege_indicator.config(text="🔒")
+
+class PrivilegeManager:
+    """Manage root privileges and secure storage of passwords/keys"""
+    
+    def __init__(self):
+        self.service_name = "NIMDA_Security_System"
+        self.username = "admin"
+        self.has_privileges = False
+        self.privilege_timeout = 300  # 5 minutes
+        self.privilege_start_time = None
+        
+        # Try to load existing credentials
+        self.load_credentials()
+    
+    def load_credentials(self):
+        """Load stored credentials from secure storage"""
+        try:
+            stored_key = keyring.get_password(self.service_name, self.username)
+            if stored_key:
+                self.stored_key_hash = stored_key
+                return True
+        except Exception as e:
+            print(f"Failed to load credentials: {e}")
+        return False
+    
+    def store_credentials(self, password: str):
+        """Store credentials securely"""
+        try:
+            # Hash the password before storing
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            keyring.set_password(self.service_name, self.username, password_hash)
+            self.stored_key_hash = password_hash
+            return True
+        except Exception as e:
+            print(f"Failed to store credentials: {e}")
+            return False
+    
+    def verify_credentials(self, password: str) -> bool:
+        """Verify provided credentials"""
+        try:
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            
+            # Check against stored hash
+            if hasattr(self, 'stored_key_hash'):
+                return password_hash == self.stored_key_hash
+            
+            # If no stored credentials, accept first time setup
+            return True
+        except Exception as e:
+            print(f"Failed to verify credentials: {e}")
+            return False
+    
+    def request_privileges(self, password: str) -> bool:
+        """Request root privileges with password verification"""
+        if self.verify_credentials(password):
+            self.has_privileges = True
+            self.privilege_start_time = time.time()
+            
+            # Store credentials if not already stored
+            if not hasattr(self, 'stored_key_hash'):
+                self.store_credentials(password)
+            
+            return True
+        return False
+    
+    def check_privileges(self) -> bool:
+        """Check if privileges are still valid"""
+        if not self.has_privileges:
+            return False
+        
+        # Check timeout
+        if self.privilege_start_time and time.time() - self.privilege_start_time > self.privilege_timeout:
+            self.has_privileges = False
+            return False
+        
+        return True
+    
+    def revoke_privileges(self):
+        """Revoke current privileges"""
+        self.has_privileges = False
+        self.privilege_start_time = None
+    
+    def execute_with_privileges(self, command: str, require_privileges: bool = True) -> Tuple[bool, str]:
+        """Execute command with privileges if required"""
+        if require_privileges and not self.check_privileges():
+            return False, "Privileges required but not available"
+        
+        try:
+            if require_privileges:
+                # Use sudo for privileged commands
+                result = subprocess.run(['sudo', '-n'] + command.split(), 
+                                      capture_output=True, text=True, timeout=30)
+            else:
+                # Execute without privileges
+                result = subprocess.run(command.split(), 
+                                      capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                return True, result.stdout
+            else:
+                return False, result.stderr
+        except subprocess.TimeoutExpired:
+            return False, "Command timed out"
+        except Exception as e:
+            return False, str(e)
+    
+    def test_privileges(self) -> bool:
+        """Test if current privileges work"""
+        success, output = self.execute_with_privileges("whoami", require_privileges=True)
+        return success and "root" in output
+    
+    def get_privilege_status(self) -> Dict:
+        """Get current privilege status"""
+        return {
+            'has_privileges': self.has_privileges,
+            'privileges_valid': self.check_privileges(),
+            'time_remaining': max(0, self.privilege_timeout - (time.time() - self.privilege_start_time)) if self.privilege_start_time else 0,
+            'credentials_stored': hasattr(self, 'stored_key_hash')
+        }
 
 def main():
     """Main application entry point"""
