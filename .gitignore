@@ -31,6 +31,10 @@ backup_before_reorganize/
 .env
 credentials.json
 
+# Security rules (downloaded at runtime)
+rules/
+*.rules
+
 # Temporary files
 *.tmp
 *.temp

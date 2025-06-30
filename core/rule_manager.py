@@ -16,9 +16,16 @@ class RuleManager:
         self.rulesets = {
             "emerging_threats": "https://rules.emergingthreats.net/open/suricata-6.0/emerging-all.rules"
         }
+        
+        # Створюємо .gitignore правило для rules директорії, якщо потрібно
+        self._ensure_gitignore_rules()
+        
         if not os.path.exists(self.rules_dir):
             os.makedirs(self.rules_dir)
             logging.info(f"Створено директорію для правил: {self.rules_dir}")
+            
+            # Створюємо README для папки rules
+            self._create_rules_readme()
 
     def _get_filename_from_url(self, url):
         """Отримує ім'я файлу з URL."""
@@ -120,6 +127,52 @@ class RuleManager:
         
         logging.info(f"Розпаршено {len(parsed_rules)} правил для аналізу.")
         return parsed_rules
+
+    def _ensure_gitignore_rules(self):
+        """Забезпечує, що папка rules є в .gitignore"""
+        gitignore_path = '.gitignore'
+        rules_ignore_line = 'rules/'
+        
+        try:
+            if os.path.exists(gitignore_path):
+                with open(gitignore_path, 'r') as f:
+                    content = f.read()
+                
+                if rules_ignore_line not in content:
+                    with open(gitignore_path, 'a') as f:
+                        f.write(f"\n# Security rules (auto-added by NIMDA)\n{rules_ignore_line}\n")
+                    logging.info("Додано rules/ до .gitignore")
+        except Exception as e:
+            logging.warning(f"Не вдалося оновити .gitignore: {e}")
+
+    def _create_rules_readme(self):
+        """Створює README файл у папці rules"""
+        readme_content = """# NIMDA Security Rules
+
+Ця папка містить правила безпеки, завантажені з відкритих джерел.
+
+⚠️ УВАГА: Ці файли не повинні потрапляти до git репозиторію через можливі 
+false positive спрацьовування GitHub Secret Scanning.
+
+## Файли в цій папці:
+- emerging-all.rules: Правила Emerging Threats
+- custom-rules.rules: Користувацькі правила (створюються вручну)
+
+## Оновлення правил:
+```bash
+python core/rule_manager.py
+```
+
+Або через GUI: Security → Update Rules
+"""
+        
+        readme_path = os.path.join(self.rules_dir, 'README.md')
+        try:
+            with open(readme_path, 'w', encoding='utf-8') as f:
+                f.write(readme_content)
+            logging.info(f"Створено README у {readme_path}")
+        except Exception as e:
+            logging.error(f"Не вдалося створити README: {e}")
 
 if __name__ == '__main__':
     # Приклад використання
