@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
+backup_before_reorganize/

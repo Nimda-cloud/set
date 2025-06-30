@@ -13,9 +13,7 @@
     "log",
     "analyze",
     "block",
-    "alert",
-    "detect_trojan",
-    "deep_analysis"
+    "alert"
   ],
   "CRITICAL": [
     "monitor",
@@ -24,10 +22,7 @@
     "block",
     "isolate",
     "ai_analysis",
-    "alert",
-    "detect_trojan",
-    "isolate_file",
-    "analyze_ecosystem"
+    "alert"
   ],
   "EMERGENCY": [
     "monitor",
@@ -40,12 +35,6 @@
     "ai_analysis",
     "trace_attack",
     "alert",
-    "detect_trojan",
-    "isolate_file",
-    "deep_analysis",
-    "quarantine",
-    "remove_malware",
-    "analyze_ecosystem",
     "clean_temp"
   ]
 }

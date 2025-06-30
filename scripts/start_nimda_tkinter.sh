@@ -62,6 +62,6 @@ python3 test_security_system.py
 
 # Start NIMDA Tkinter GUI
 echo "🚀 Starting NIMDA Security System Tkinter GUI..."
-python3 nimda_tkinter.py
+python3 ../nimda_tkinter.py
 
 echo "👋 NIMDA Security System stopped" 
