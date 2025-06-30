@@ -6,14 +6,17 @@ Advanced security monitoring with multithreading and responsive design
 
 import tkinter as tk
 import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
+from ttkbootstrap.constants import (
+    HORIZONTAL, VERTICAL, LEFT, RIGHT, TOP, BOTTOM,
+    X, Y, BOTH, W, E, EW, CENTER, WORD, SUCCESS,
+    INFO, WARNING, DANGER
+)
 import threading
 import queue
-import time
 import os
 import sys
 from datetime import datetime
-import psutil
+from typing import Dict, Any
 import logging
 import json
 
@@ -24,6 +27,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.optimized_rule_manager import OptimizedRuleManager
 from core.enhanced_threat_analyzer import EnhancedThreatAnalyzer
 from core.security_monitoring_thread import SecurityMonitoringThread
+from core.kernel_monitor import KernelMonitor
+from core.system_query_engine import SystemQueryEngine
+from core.deception_manager import DeceptionManager
 from llm_security_agent import LLMSecurityAgent
 
 # Configure logging
@@ -64,6 +70,20 @@ class NimdaModernGUI:
         self.threat_analyzer = EnhancedThreatAnalyzer(db_path=db_path)
         self.llm_agent = LLMSecurityAgent()
         
+        # Phase 1: Kernel-level monitoring
+        self.kernel_monitor = KernelMonitor(self.event_queue)
+        
+        # Phase 2: AI hunting capabilities
+        self.system_query_engine = SystemQueryEngine()
+        
+        # Phase 3: Deception management
+        self.deception_manager = DeceptionManager(self.handle_deception_alert)
+        
+        # Enhanced monitoring with kernel-level capabilities
+        self.kernel_monitor = KernelMonitor(self.event_queue)
+        self.system_query_engine = SystemQueryEngine()
+        self.deception_manager = DeceptionManager(self.handle_deception_alert)
+        
         # Monitoring thread with optimized implementation
         self.monitor_thread = SecurityMonitoringThread(
             event_queue=self.event_queue,
@@ -71,10 +91,18 @@ class NimdaModernGUI:
             db_path=db_path
         )
         
+        # Start kernel-level monitoring
+        self.kernel_monitor.start()
+        
         # Initialize UI components
         self.create_widgets()
         
-        # Start monitoring thread
+        # Start monitoring thread (legacy system monitoring for compatibility)
+        self.monitor_thread = SecurityMonitoringThread(
+            event_queue=self.event_queue,
+            interval=5,
+            db_path=db_path
+        )
         self.monitor_thread.start()
         
         # Set up queue processing
@@ -163,6 +191,8 @@ class NimdaModernGUI:
         self.create_network_tab()
         self.create_processes_tab()
         self.create_ai_tab()
+        self.create_ai_hunter_tab()  # NEW: AI Hunting tab
+        self.create_deception_tab()  # NEW: Deception management tab
         self.create_logs_tab()
     
     def create_dashboard_tab(self):
@@ -521,6 +551,12 @@ class NimdaModernGUI:
                 elif event_type == "threat_analysis":
                     # AI-generated threat analysis results
                     self.handle_threat_analysis(event_data, event_timestamp)
+                elif event_type == "honeypot_alert":
+                    # Deception alert events
+                    self.handle_deception_alert(event_data)
+                elif event_type == "kernel_event":
+                    # Kernel event monitoring
+                    self.handle_kernel_event(event_data)
                 else:
                     # Unknown event type - log it for debugging
                     self.add_action_log(f"Unknown event type: {event_type}", "WARNING")
@@ -541,723 +577,443 @@ class NimdaModernGUI:
         self.active_connections_label.config(text=f"Active Connections: {len(connections)}")
     
     def handle_process_update(self, processes):
-        """Handle process list update event"""
+        """Handle running processes update event"""
         # Update processes tree
         self.update_processes_tree(processes)
     
     def handle_system_info_update(self, system_info):
         """Handle system information update event"""
-        # Update CPU
-        cpu_percent = system_info.get('cpu_percent', 0)
-        self.cpu_bar['value'] = cpu_percent
-        self.cpu_label.config(text=f"{cpu_percent:.1f}%")
-        
-        # Update Memory
-        memory_percent = system_info.get('memory_percent', 0)
-        self.memory_bar['value'] = memory_percent
-        self.memory_label.config(text=f"{memory_percent:.1f}%")
-        
-        # Update Disk
-        disk_percent = system_info.get('disk_percent', 0)
-        self.disk_bar['value'] = disk_percent
-        self.disk_label.config(text=f"{disk_percent:.1f}%")
-        
-        # Update network I/O
-        if hasattr(self, 'prev_system_info'):
-            time_diff = time.time() - self.prev_system_info.get('timestamp', 0)
-            if time_diff > 0:
-                # Calculate bytes/sec
-                bytes_sent = system_info.get('network_bytes_sent', 0)
-                bytes_recv = system_info.get('network_bytes_recv', 0)
-                prev_bytes_sent = self.prev_system_info.get('network_bytes_sent', 0)
-                prev_bytes_recv = self.prev_system_info.get('network_bytes_recv', 0)
-                
-                bytes_sent_per_sec = (bytes_sent - prev_bytes_sent) / time_diff
-                bytes_recv_per_sec = (bytes_recv - prev_bytes_recv) / time_diff
-                
-                # Update labels with human readable format
-                self.network_in_label.config(text=f"Received: {self.format_bytes(bytes_recv_per_sec)}/s")
-                self.network_out_label.config(text=f"Sent: {self.format_bytes(bytes_sent_per_sec)}/s")
-        
-        # Save current info for next comparison
-        system_info['timestamp'] = time.time()
-        self.prev_system_info = system_info
+        # Update system metrics on dashboard
+        self.update_system_metrics(system_info)
     
     def handle_security_events(self, events):
         """Handle security events update"""
-        for event in events:
-            # Add to alerts if it's a high or critical risk
-            risk_level = event.get('risk_level', '').lower()
-            if risk_level in ['high', 'critical']:
-                self.add_alert(
-                    time=event.get('timestamp', ''),
-                    severity=risk_level,
-                    description=event.get('event_type', '') + ': ' + event.get('action', ''),
-                )
-            
-            # Add to events text on dashboard
-            timestamp = datetime.strptime(
-                event.get('timestamp', '')[:19],  # Remove microseconds
-                "%Y-%m-%dT%H:%M:%S"
-            ).strftime("%H:%M:%S")
-            
-            self.events_text.insert(
-                "1.0",
-                f"[{timestamp}] {event.get('event_type', '')}: {event.get('action', '')}\n"
-            )
-            
-            # Add to logs
-            self.add_log_entry(
-                f"{event.get('timestamp', '')}: {event.get('event_type', '')} - "
-                f"{event.get('device_name', '')}: {event.get('action', '')}"
-            )
-    
-    def handle_monitoring_error(self, error_msg):
-        """Handle monitoring error event"""
-        self.add_action_log(f"Monitoring error: {error_msg}", level="ERROR")
-        self.status_label.config(text=f"Error: {error_msg[:30]}...")
-    
-    def handle_monitoring_status(self, status_data):
-        """Handle monitoring status update"""
-        status = status_data.get('status', 'unknown')
-        message = status_data.get('message', '')
+        # Update alerts tree and dashboard
+        self.update_alerts_tree(events)
+        self.update_dashboard_alerts_count(len(events))
         
-        if status == 'active':
-            self.monitoring_status.config(text="Monitoring: Active")
-            self.add_action_log(f"Monitoring active: {message}")
-        elif status == 'error':
-            self.monitoring_status.config(text="Monitoring: Error")
-            self.add_action_log(f"Monitoring error: {message}", "ERROR")
-        elif status == 'paused':
-            self.monitoring_status.config(text="Monitoring: Paused")
-            self.add_action_log(f"Monitoring paused: {message}", "WARNING")
+        # Log the received security events
+        for event in events:
+            self.add_action_log(f"Security event received: {event.get('description')}")
+    
+    def handle_monitoring_error(self, error_info):
+        """Handle monitoring error event"""
+        error_message = error_info.get("message", "Unknown error")
+        self.add_action_log(f"Monitoring error: {error_message}", "ERROR")
+    
+    def handle_monitoring_status(self, status_info):
+        """Handle monitoring status update"""
+        status = status_info.get("status", "unknown")
+        if status == "active":
+            self.monitoring_status.config(text="Monitoring: Active", foreground=self.style.colors.success)
+        elif status == "paused":
+            self.monitoring_status.config(text="Monitoring: Paused", foreground=self.style.colors.warning)
         else:
-            self.monitoring_status.config(text=f"Monitoring: {status}")
-            self.add_action_log(f"Monitoring status changed: {message}")
+            self.monitoring_status.config(text="Monitoring: Unknown", foreground=self.style.colors.danger)
     
     def handle_security_alert(self, alert_data, timestamp):
-        """Handle security alerts from the enhanced monitoring thread"""
+        """Handle a new security alert"""
         # Extract alert details
-        severity = alert_data.get('threat_level', 'medium').lower()
-        source = alert_data.get('source', 'unknown')
-        target = alert_data.get('target', 'unknown')
-        description = alert_data.get('description', '')
-        details = alert_data.get('details', '')
+        severity = alert_data.get("severity", "medium")
+        description = alert_data.get("description", "No description")
         
-        # Format timestamp for display
-        display_time = timestamp
-        if isinstance(timestamp, str) and 'T' in timestamp:
-            display_time = timestamp.split('T')[1][:8]  # Extract HH:MM:SS
+        # Insert alert into treeview
+        self.alerts_tree.insert("", "end", values=(timestamp, severity, description), tags=[severity])
         
-        # Add to alerts panel
-        self.add_alert(
-            time=display_time,
-            severity=severity,
-            description=f"{source} → {target}: {description}"
-        )
+        # Update active alerts count on dashboard
+        current_count = int(self.alert_count_label.cget("text").split(": ")[1])
+        self.alert_count_label.config(text=f"Active Alerts: {current_count + 1}")
         
-        # Add to events text on dashboard
-        self.events_text.insert(
-            "1.0",
-            f"[{display_time}] ALERT ({severity.upper()}): {description}\n"
-        )
-        
-        # Add to logs with full details
-        self.add_log_entry(
-            f"{timestamp}: ALERT ({severity.upper()}) - {source} → {target}: {description}\n"
-            f"Details: {details}"
-        )
-        
-        # Update action log
-        self.add_action_log(f"Security alert detected: {description}", "ALERT")
+        # Log the new alert
+        self.add_action_log(f"New alert: {description} (Severity: {severity})")
     
     def handle_file_change(self, file_data, timestamp):
-        """Handle file system change events"""
-        # Extract file change details
-        file_path = file_data.get('path', 'unknown')
-        change_type = file_data.get('change_type', 'modified')
-        threat_level = file_data.get('threat_level', 'info').lower()
-        details = file_data.get('details', '')
+        """Handle file system change event"""
+        file_path = file_data.get("path", "Unknown")
+        change_type = file_data.get("change_type", "Modified")
         
-        # Format timestamp for display
-        display_time = timestamp
-        if isinstance(timestamp, str) and 'T' in timestamp:
-            display_time = timestamp.split('T')[1][:8]  # Extract HH:MM:SS
-        
-        # Add to events text on dashboard
-        self.events_text.insert(
-            "1.0",
-            f"[{display_time}] FILE {change_type}: {file_path}\n"
-        )
-        
-        # Add to logs
-        self.add_log_entry(
-            f"{timestamp}: File {change_type} - {file_path} - Threat: {threat_level.upper()}\n"
-            f"Details: {details}"
-        )
-        
-        # If high-risk file change, add as alert
-        if threat_level in ['high', 'critical']:
-            self.add_alert(
-                time=display_time,
-                severity=threat_level,
-                description=f"File {change_type}: {file_path}"
-            )
+        # Log the file change
+        self.add_action_log(f"File {change_type}: {file_path}")
     
-    def handle_usb_device(self, usb_data, timestamp):
-        """Handle USB device events"""
-        # Extract USB event details
-        device_name = usb_data.get('device_name', 'unknown')
-        event_type = usb_data.get('event_type', 'connected')
-        vendor_id = usb_data.get('vendor_id', 'unknown')
-        product_id = usb_data.get('product_id', 'unknown')
+    def handle_usb_device(self, device_data, timestamp):
+        """Handle USB device event"""
+        device_name = device_data.get("name", "Unknown Device")
+        action = device_data.get("action", "Connected")
         
-        # Format timestamp for display
-        display_time = timestamp
-        if isinstance(timestamp, str) and 'T' in timestamp:
-            display_time = timestamp.split('T')[1][:8]  # Extract HH:MM:SS
-        
-        # Add to events text on dashboard
-        self.events_text.insert(
-            "1.0",
-            f"[{display_time}] USB {event_type.upper()}: {device_name}\n"
-        )
-        
-        # Add to logs
-        self.add_log_entry(
-            f"{timestamp}: USB {event_type} - {device_name} - "
-            f"VendorID: {vendor_id} ProductID: {product_id}"
-        )
-        
-        # Add to action log
-        self.add_action_log(f"USB device {event_type}: {device_name}")
-        
-        # Always add USB events as alerts (medium severity)
-        self.add_alert(
-            time=display_time,
-            severity="medium",
-            description=f"USB {event_type}: {device_name}"
-        )
+        # Log the USB device event
+        self.add_action_log(f"USB Device {action}: {device_name}")
     
     def handle_threat_analysis(self, analysis_data, timestamp):
-        """Handle AI threat analysis results"""
+        """Handle AI-generated threat analysis results"""
         # Extract analysis details
-        threat_level = analysis_data.get('threat_level', 'info').lower()
-        analysis = analysis_data.get('analysis', '')
-        confidence = analysis_data.get('confidence', 0)
-        # Source event details if we need to reference them later
-        source_type = analysis_data.get('source_event', {}).get('type', 'unknown')
-        recommendations = analysis_data.get('recommendations', [])
+        threats = analysis_data.get("threats", [])
+        recommendations = analysis_data.get("recommendations", [])
         
-        # Format timestamp for display
-        display_time = timestamp
-        if isinstance(timestamp, str) and 'T' in timestamp:
-            display_time = timestamp.split('T')[1][:8]  # Extract HH:MM:SS
+        # Update AI response area with analysis results
+        response = "Threat Analysis Results:\n\n"
+        response += "Identified Threats:\n"
+        for threat in threats:
+            response += f"- {threat}\n"
         
-        # Add to events text on dashboard
-        self.events_text.insert(
-            "1.0",
-            f"[{display_time}] ANALYSIS: {threat_level.upper()} confidence {confidence}%\n"
+        response += "\nRecommendations:\n"
+        for rec in recommendations:
+            response += f"- {rec}\n"
+        
+        self.response_text.delete(1.0, tk.END)
+        self.response_text.insert(tk.END, response)
+        
+        # Log the threat analysis
+        self.add_action_log("Threat analysis completed")
+    
+    def handle_deception_alert(self, event_type: str, data: Dict[str, Any]):
+        """Handle deception/honeypot alerts"""
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        
+        if event_type == "honeypot_file_access":
+            description = f"File honeypot triggered: {data.get('action', 'unknown')} on {data.get('file_path', 'unknown')}"
+        elif event_type == "honeypot_port_access":
+            description = f"Port honeypot triggered: Connection from {data.get('source_ip', 'unknown')} to port {data.get('port', 'unknown')}"
+        else:
+            description = f"Honeypot triggered: {event_type}"
+        
+        # Add to main alerts
+        self.add_alert(
+            time=timestamp,
+            severity="CRITICAL",
+            description=description
         )
         
-        # Add to logs
-        log_entry = (
-            f"{timestamp}: Threat Analysis - Level: {threat_level.upper()} - "
-            f"Confidence: {confidence}% - Source: {source_type}\n"
-            f"Analysis: {analysis}\n"
-        )
+        # Add to deception alerts
+        alert_text = f"[{timestamp}] {description}\nDetails: {json.dumps(data, indent=2)}\n\n"
+        self.deception_alerts_text.insert("1.0", alert_text)
         
-        if recommendations:
-            log_entry += "Recommendations:\n"
-            for i, rec in enumerate(recommendations, 1):
-                log_entry += f"{i}. {rec}\n"
-                
-        self.add_log_entry(log_entry)
+        # Update action log
+        self.add_action_log(f"HONEYPOT ALERT: {description}", "CRITICAL")
         
-        # If AI found a significant threat, add as alert
-        if threat_level in ['medium', 'high', 'critical']:
-            self.add_alert(
-                time=display_time,
-                severity=threat_level,
-                description=f"AI Analysis: {analysis[:50]}..."
-            )
-            
-            # Update action log
-            self.add_action_log(f"AI detected {threat_level} threat: {analysis[:50]}...", 
-                               "WARNING" if threat_level == "medium" else "ALERT")
-    
-    def check_ai_connection(self):
-        """Check the AI connection status"""
-        self.add_action_log("Checking AI connection...")
-        self.status_label.config(text="Checking AI connection...")
-        
-        # Run in separate thread
-        def check_thread():
-            try:
-                connected = self.llm_agent.check_ollama_connection()
-                models = []
-                
-                if connected:
-                    models = self.llm_agent.get_available_models()
-                    model_str = ", ".join(models) if models else "None"
-                    
-                    self.root.after(0, lambda: self.ai_status_label.config(
-                        text=f"✅ Connected | Models: {model_str}",
-                        foreground="green"
-                    ))
-                    self.root.after(0, lambda: self.add_action_log("AI connection successful"))
-                else:
-                    self.root.after(0, lambda: self.ai_status_label.config(
-                        text="❌ Not connected - Please start Ollama",
-                        foreground="red"
-                    ))
-                    self.root.after(0, lambda: self.add_action_log("AI connection failed", "WARNING"))
-                
-                self.root.after(0, lambda: self.status_label.config(text="AI connection check completed"))
-            except Exception as e:
-                error_msg = str(e)
-                self.root.after(0, lambda: self.ai_status_label.config(
-                    text=f"❌ Error: {error_msg[:30]}...",
-                    foreground="red"
-                ))
-                self.root.after(0, lambda: self.add_action_log(f"Error checking AI connection: {error_msg}", "ERROR"))
-                self.root.after(0, lambda: self.status_label.config(text="Error checking AI connection"))
-        
-        # Start the thread
-        threading.Thread(target=check_thread, daemon=True).start()
-    
-    def analyze_threats(self):
-        """Analyze security threats using AI"""
-        query = self.query_entry.get()
-        if not query:
-            return
-        
-        self.add_action_log(f"Analyzing: {query}")
-        self.status_label.config(text="Analyzing threats...")
-        
-        # Clear current response
-        self.response_text.delete(1.0, tk.END)
-        self.response_text.insert(tk.END, "Analyzing threats, please wait...\n")
-        
-        # Run in separate thread
-        def analyze_thread():
-            try:
-                response = self.llm_agent.query_ollama(
-                    f"Analyze this security question as a macOS security expert and provide a detailed response: {query}", 
-                    "You are a macOS security expert analyzing system security."
-                )
-                
-                self.root.after(0, lambda: self.response_text.delete(1.0, tk.END))
-                self.root.after(0, lambda: self.response_text.insert(tk.END, response))
-                self.root.after(0, lambda: self.add_action_log("Threat analysis completed"))
-                self.root.after(0, lambda: self.status_label.config(text="Analysis completed"))
-            except Exception as e:
-                error_msg = str(e)
-                self.root.after(0, lambda: self.response_text.delete(1.0, tk.END))
-                self.root.after(0, lambda: self.response_text.insert(tk.END, f"Error: {error_msg}"))
-                self.root.after(0, lambda: self.add_action_log(f"Error in threat analysis: {error_msg}", "ERROR"))
-                self.root.after(0, lambda: self.status_label.config(text="Error in analysis"))
-        
-        # Start the thread
-        threading.Thread(target=analyze_thread, daemon=True).start()
-    
-    def get_recommendations(self):
-        """Get security recommendations using AI"""
-        self.add_action_log("Getting security recommendations...")
-        self.status_label.config(text="Getting security recommendations...")
-        
-        # Clear current response
-        self.response_text.delete(1.0, tk.END)
-        self.response_text.insert(tk.END, "Generating recommendations, please wait...\n")
-        
-        # Run in separate thread
-        def recommend_thread():
-            try:
-                response = self.llm_agent.query_ollama(
-                    "Provide a list of the top 5 security recommendations for a macOS system. Include specific commands where applicable.",
-                    "You are a macOS security expert providing actionable recommendations."
-                )
-                
-                self.root.after(0, lambda: self.response_text.delete(1.0, tk.END))
-                self.root.after(0, lambda: self.response_text.insert(tk.END, response))
-                self.root.after(0, lambda: self.add_action_log("Security recommendations generated"))
-                self.root.after(0, lambda: self.status_label.config(text="Recommendations generated"))
-            except Exception as e:
-                error_msg = str(e)
-                self.root.after(0, lambda: self.response_text.delete(1.0, tk.END))
-                self.root.after(0, lambda: self.response_text.insert(tk.END, f"Error: {error_msg}"))
-                self.root.after(0, lambda: self.add_action_log(f"Error getting recommendations: {error_msg}", "ERROR"))
-                self.root.after(0, lambda: self.status_label.config(text="Error in recommendations"))
-        
-        # Start the thread
-        threading.Thread(target=recommend_thread, daemon=True).start()
-    
-    def security_report(self):
-        """Generate a security report using AI"""
-        self.add_action_log("Generating security report...")
-        self.status_label.config(text="Generating security report...")
-        
-        # Clear current response
-        self.response_text.delete(1.0, tk.END)
-        self.response_text.insert(tk.END, "Generating security report, please wait...\n")
-        
-        # Collect system information for the report
-        process_count = len(self.processes_tree.get_children())
-        connection_count = len(self.connections_tree.get_children())
-        alert_count = len(self.alerts_tree.get_children())
-        
-        try:
-            rule_count = len(self.rule_manager.get_parsed_rules())
-        except Exception as e:
-            logging.warning(f"Could not get rule count: {e}")
-            rule_count = 0
-        
-        report_data = {
-            "processes": process_count,
-            "connections": connection_count,
-            "alerts": alert_count,
-            "rules": rule_count,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
-        # Run in separate thread
-        def report_thread():
-            try:
-                # Format the system information as a prompt
-                system_info = f"""
-System Information:
-- Active Processes: {report_data['processes']}
-- Network Connections: {report_data['connections']}
-- Security Alerts: {report_data['alerts']}
-- Security Rules: {report_data['rules']}
-- Report Time: {report_data['timestamp']}
-"""
-                
-                response = self.llm_agent.query_ollama(
-                    f"Based on the following system information, generate a comprehensive security report for a macOS system. Include any potential concerns and recommendations:\n\n{system_info}",
-                    "You are a macOS security expert generating a detailed security report."
-                )
-                
-                self.root.after(0, lambda: self.response_text.delete(1.0, tk.END))
-                self.root.after(0, lambda: self.response_text.insert(tk.END, response))
-                self.root.after(0, lambda: self.add_action_log("Security report generated"))
-                self.root.after(0, lambda: self.status_label.config(text="Security report generated"))
-            except Exception as e:
-                error_msg = str(e)
-                self.root.after(0, lambda: self.response_text.delete(1.0, tk.END))
-                self.root.after(0, lambda: self.response_text.insert(tk.END, f"Error: {error_msg}"))
-                self.root.after(0, lambda: self.add_action_log(f"Error generating report: {error_msg}", "ERROR"))
-                self.root.after(0, lambda: self.status_label.config(text="Error generating report"))
-        
-        # Start the thread
-        threading.Thread(target=report_thread, daemon=True).start()
-    
-    def clear_logs(self):
-        """Clear the logs text"""
-        self.logs_text.delete(1.0, tk.END)
-        self.add_action_log("Logs cleared")
-    
-    def export_logs(self):
-        """Export logs to a file"""
-        logs = self.logs_text.get(1.0, tk.END)
-        
-        # Get timestamp for filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"nimda_security_logs_{timestamp}.txt"
-        
-        try:
-            with open(filename, 'w') as file:
-                file.write(logs)
-            
-            self.add_action_log(f"Logs exported to {filename}")
-            self.status_label.config(text=f"Logs exported to {filename}")
-        except Exception as e:
-            self.add_action_log(f"Error exporting logs: {str(e)}", "ERROR")
-            self.status_label.config(text="Error exporting logs")
-    
-    def on_closing(self):
-        """Clean up and close the application"""
-        # Stop the monitoring thread
-        if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.stop()
-            self.monitor_thread.join(timeout=1.0)
-        
-        self.root.destroy()
-    
-    def format_bytes(self, bytes_value, decimals=1):
-        """Format bytes to a human-readable format"""
-        if bytes_value < 0:
-            return "0 B"
-        
-        suffixes = ['B', 'KB', 'MB', 'GB', 'TB']
-        i = 0
-        while bytes_value >= 1024 and i < len(suffixes) - 1:
-            bytes_value /= 1024
-            i += 1
-        
-        return f"{bytes_value:.{decimals}f} {suffixes[i]}"
-    
-    def update_connections_tree(self, connections):
-        """Update the connections treeview with new data"""
-        # Clear current items
-        for item in self.connections_tree.get_children():
-            self.connections_tree.delete(item)
-        
-        # Add new connections
-        for conn in connections:
-            self.connections_tree.insert(
-                "", 
-                "end", 
-                values=(
-                    conn.get('local_address', ''),
-                    conn.get('remote_address', ''),
-                    conn.get('process_name', 'N/A'),
-                    conn.get('status', '')
-                )
-            )
-    
-    def update_processes_tree(self, processes):
-        """Update the processes treeview with new data"""
-        # Clear current items
-        for item in self.processes_tree.get_children():
-            self.processes_tree.delete(item)
-        
-        # Sort processes by CPU usage (descending)
-        sorted_processes = sorted(
-            processes, 
-            key=lambda p: p.get('cpu_percent', 0) or 0,
-            reverse=True
-        )
-        
-        # Add new processes
-        for proc in sorted_processes[:100]:  # Limit to 100 processes
-            self.processes_tree.insert(
-                "", 
-                "end", 
-                values=(
-                    proc.get('pid', ''),
-                    proc.get('name', '')[:20],
-                    proc.get('username', '')[:15],
-                    f"{proc.get('cpu_percent', 0):.1f}" if proc.get('cpu_percent') else "0.0",
-                    f"{proc.get('memory_percent', 0):.1f}" if proc.get('memory_percent') else "0.0",
-                    proc.get('status', '')
-                )
-            )
-    
-    def add_alert(self, time, severity, description):
-        """Add an alert to the alerts treeview"""
-        # Format time to just the time portion (not date)
-        if 'T' in time:
-            time = time.split('T')[1][:8]  # Extract HH:MM:SS
-        
-        # Insert at the top
-        self.alerts_tree.insert(
-            "", 
-            0, 
-            values=(time, severity.upper(), description),
-            tags=(severity,)
-        )
-        
-        # Update alert count on dashboard
-        alert_count = len(self.alerts_tree.get_children())
-        self.alert_count_label.config(text=f"Active Alerts: {alert_count}")
-        
-        # Update threat level if critical alert
-        if severity.lower() == 'critical':
-            self.threat_level_label.config(
-                text="CRITICAL", 
-                foreground=self.style.colors.danger
-            )
-        elif severity.lower() == 'high' and self.threat_level_label['text'] != "CRITICAL":
-            self.threat_level_label.config(
-                text="HIGH", 
-                foreground=self.style.colors.warning
-            )
-    
-    def add_log_entry(self, message):
-        """Add an entry to the logs tab"""
-        self.logs_text.insert("1.0", f"{message}\n")
-    
-    def add_action_log(self, message, level="INFO"):
-        """Add an entry to the action log on the dashboard"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.action_text.insert("1.0", f"[{timestamp}] {level}: {message}\n")
-    
-    def refresh_connections(self):
-        """Manually refresh network connections"""
-        self.add_action_log("Refreshing network connections...")
-        self.status_label.config(text="Refreshing network connections...")
-    
-    def refresh_processes(self):
-        """Manually refresh processes"""
-        self.add_action_log("Refreshing processes...")
-        self.status_label.config(text="Refreshing processes...")
-    
-    def run_full_scan(self):
-        """Run a full security scan"""
-        self.add_action_log("Starting full security scan...")
-        self.status_label.config(text="Running full security scan...")
-        
-        # Update last scan time
-        scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.last_scan_label.config(text=f"Last Scan: {scan_time}")
-    
-    def update_rules(self):
-        """Update security rules"""
-        self.add_action_log("Updating security rules...")
-        self.status_label.config(text="Updating security rules...")
-        
-        # Run in separate thread
-        def update_thread():
-            try:
-                success_count = self.rule_manager.update_all_rules()
-                
-                # Update UI in main thread
-                self.root.after(0, lambda: self.add_action_log(f"Updated {success_count} rule sets"))
-                self.root.after(0, lambda: self.status_label.config(text="Rules updated successfully"))
-                
-                # Update rule count
-                rules = self.rule_manager.get_parsed_rules()
-                self.root.after(0, lambda: self.rule_count_label.config(text=f"Active Rules: {len(rules)}"))
-            except Exception as e:
-                error_msg = str(e)
-                self.root.after(0, lambda: self.add_action_log(f"Error updating rules: {error_msg}", "ERROR"))
-                self.root.after(0, lambda: self.status_label.config(text="Error updating rules"))
-        
-        # Start the thread
-        threading.Thread(target=update_thread, daemon=True).start()
-    
-    def block_selected_connection(self):
-        """Block the selected network connection"""
-        selected = self.connections_tree.selection()
-        if not selected:
-            return
-        
-        item = self.connections_tree.item(selected[0])
-        values = item['values']
-        
-        remote_address = values[1]
-        process = values[2]
-        
-        self.add_action_log(f"Blocking connection to {remote_address} ({process})")
-        self.status_label.config(text=f"Blocked connection to {remote_address}")
-    
-    def analyze_selected_connection(self):
-        """Analyze the selected network connection"""
-        selected = self.connections_tree.selection()
-        if not selected:
-            return
-        
-        item = self.connections_tree.item(selected[0])
-        values = item['values']
-        
-        remote_address = values[1]
-        process = values[2]
-        
-        self.add_action_log(f"Analyzing connection to {remote_address} ({process})")
-        
-        # Switch to AI tab
-        self.notebook.select(self.notebook.index(self.notebook.tabs()[-2]))  # AI tab
-        
-        # Set query
-        self.query_entry.delete(0, tk.END)
-        self.query_entry.insert(0, f"Analyze network connection to {remote_address} from {process}")
-        
-        # Trigger analysis
-        self.analyze_threats()
-    
-    def terminate_selected_process(self):
-        """Terminate the selected process"""
-        selected = self.processes_tree.selection()
-        if not selected:
-            return
-        
-        item = self.processes_tree.item(selected[0])
-        values = item['values']
-        
-        pid = values[0]
-        name = values[1]
-        
-        self.add_action_log(f"Terminating process {name} (PID: {pid})")
-        self.status_label.config(text=f"Terminated process {name}")
-    
-    def analyze_selected_process(self):
-        """Analyze the selected process"""
-        selected = self.processes_tree.selection()
-        if not selected:
-            return
-        
-        item = self.processes_tree.item(selected[0])
-        values = item['values']
-        
-        pid = values[0]
-        name = values[1]
-        
-        self.add_action_log(f"Analyzing process {name} (PID: {pid})")
-        
-        # Trigger AI analysis
-        process_info = {
-            'pid': int(pid),
-            'name': name,
-            'user': values[2],
-            'cpu_percent': float(values[3]),
-            'memory_percent': float(values[4])
-        }
-        
-        # Run in separate thread
-        def analyze_thread():
-            try:
-                result = self.threat_analyzer.analyze_process_activity(process_info)
-                
-                # Update UI in main thread
-                self.root.after(0, lambda: self.display_process_analysis(result))
-            except Exception as e:
-                error_msg = str(e)
-                self.root.after(0, lambda: self.add_action_log(f"Error analyzing process: {error_msg}", "ERROR"))
-                self.root.after(0, lambda: self.status_label.config(text="Error analyzing process"))
-        
-        # Start the thread
-        threading.Thread(target=analyze_thread, daemon=True).start()
-    
-    def display_process_analysis(self, result):
-        """Display process analysis results in the AI tab"""
-        # Switch to AI tab
-        self.notebook.select(self.notebook.index(self.notebook.tabs()[-2]))  # AI tab
-        
-        # Clear current response
-        self.response_text.delete(1.0, tk.END)
-        
-        # Add analysis results
-        process_info = result.get('process_info', {})
-        
-        self.response_text.insert(tk.END, "# Process Analysis\n\n")
-        self.response_text.insert(tk.END, "## Process Information\n")
-        self.response_text.insert(tk.END, f"- Name: {process_info.get('name', 'Unknown')}\n")
-        self.response_text.insert(tk.END, f"- PID: {process_info.get('pid', 'Unknown')}\n")
-        self.response_text.insert(tk.END, f"- User: {process_info.get('user', 'Unknown')}\n")
-        
-        self.response_text.insert(tk.END, "\n## Threat Analysis\n")
-        self.response_text.insert(tk.END, f"- Threat Level: {result.get('threat_level', 'info').upper()}\n")
-        
-        # Add suspicious indicators
-        indicators = result.get('suspicious_indicators', [])
-        if indicators:
-            self.response_text.insert(tk.END, "\n## Suspicious Indicators\n")
-            for indicator in indicators:
-                self.response_text.insert(tk.END, f"- {indicator}\n")
-        
-        # Add AI analysis
-        ai_analysis = result.get('ai_analysis', {})
-        if ai_analysis:
-            self.response_text.insert(tk.END, "\n## AI Analysis\n")
-            self.response_text.insert(tk.END, f"- Analysis: {ai_analysis.get('analysis', 'N/A')}\n")
-            self.response_text.insert(tk.END, f"- Confidence: {ai_analysis.get('confidence', 0)}%\n")
-        
-        # Add suggested commands
-        commands = result.get('suggested_commands', [])
-        if commands:
-            self.response_text.insert(tk.END, "\n## Recommended Commands\n")
-            for i, cmd in enumerate(commands, 1):
-                self.response_text.insert(tk.END, f"{i}. `{cmd}`\n")
+        # Update honeypots tree
+        self.update_honeypots_tree()
 
-    # ...existing methods continue...
+    def add_alert(self, timestamp: str, severity: str, description: str):
+        """Add a new alert to the alerts tree with the specified severity level"""
+        self.alerts_tree.insert("", "end", values=(timestamp, severity, description), tags=[severity.lower()])
+        
+        # Update alerts count
+        current_count = int(self.alert_count_label.cget("text").split(": ")[1])
+        self.alert_count_label.config(text=f"Active Alerts: {current_count + 1}")
+        
+        # Log the alert
+        self.add_action_log(f"New {severity} alert: {description}")
+
+    def add_action_log(self, message: str, level: str = "INFO"):
+        """Add a message to the action log with optional level"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = f"[{timestamp}] [{level}] {message}\n"
+        
+        # Add to action log
+        self.action_text.insert("1.0", log_entry)
+        
+        # Keep only the last 1000 lines
+        content = self.action_text.get("1.0", tk.END)
+        if content.count("\n") > 1000:
+            lines = content.splitlines()[-1000:]
+            self.action_text.delete("1.0", tk.END)
+            self.action_text.insert("1.0", "\n".join(lines))
+    
+    def create_ai_hunter_tab(self):
+        """Create the AI hunting tab"""
+        hunter_frame = ttk.Frame(self.notebook)
+        self.notebook.add(hunter_frame, text="🎯 AI Hunter")
+
+        # Status section
+        status_frame = ttk.LabelFrame(hunter_frame, text="AI Hunter Status", padding=10)
+        status_frame.pack(fill=X, padx=10, pady=5)
+
+        self.hunter_status_label = ttk.Label(status_frame, text="AI Hunter is STOPPED", foreground="red")
+        self.hunter_status_label.pack(side=LEFT, pady=5)
+
+        control_frame = ttk.Frame(status_frame)
+        control_frame.pack(side=RIGHT, pady=5)
+
+        ttk.Button(
+            control_frame,
+            text="Start Hunter",
+            command=self.start_ai_hunter,
+            bootstyle="success"
+        ).pack(side=LEFT, padx=5)
+
+        ttk.Button(
+            control_frame,
+            text="Stop Hunter",
+            command=self.stop_ai_hunter,
+            bootstyle="danger"
+        ).pack(side=LEFT, padx=5)
+
+        # Current hypothesis section
+        hypothesis_frame = ttk.LabelFrame(hunter_frame, text="Current Hypothesis", padding=10)
+        hypothesis_frame.pack(fill=X, padx=10, pady=5)
+
+        self.hunter_hypothesis_label = ttk.Label(
+            hypothesis_frame,
+            text="No active hypothesis",
+            wraplength=600
+        )
+        self.hunter_hypothesis_label.pack(anchor=W, pady=5)
+
+        ttk.Button(
+            hypothesis_frame,
+            text="Generate New Hypothesis",
+            command=self.generate_single_hypothesis,
+            bootstyle="info"
+        ).pack(anchor=W, pady=5)
+
+        # Results section
+        results_frame = ttk.LabelFrame(hunter_frame, text="Investigation Results", padding=10)
+        results_frame.pack(fill=BOTH, expand=True, padx=10, pady=5)
+
+        # Results text area
+        self.hunter_results_text = ttk.Text(results_frame, wrap=WORD, height=15)
+        results_scrollbar = ttk.Scrollbar(results_frame, orient=VERTICAL, command=self.hunter_results_text.yview)
+        self.hunter_results_text.configure(yscrollcommand=results_scrollbar.set)
+
+        self.hunter_results_text.pack(side=LEFT, fill=BOTH, expand=True)
+        results_scrollbar.pack(side=RIGHT, fill=Y)
+
+        # Initialize attributes
+        self.ai_hunter_running = False
+
+    def create_deception_tab(self):
+        """Create the deception management tab"""
+        deception_frame = ttk.Frame(self.notebook)
+        self.notebook.add(deception_frame, text="🎭 Deception")
+
+        # Honeypots configuration frame
+        config_frame = ttk.LabelFrame(deception_frame, text="Honeypot Configuration", padding=10)
+        config_frame.pack(fill=X, padx=10, pady=5)
+
+        # File honeypots
+        file_frame = ttk.Frame(config_frame)
+        file_frame.pack(fill=X, pady=5)
+        
+        ttk.Label(file_frame, text="Deploy File Honeypot:").pack(side=LEFT, padx=5)
+        
+        ttk.Button(
+            file_frame,
+            text="Credentials File",
+            command=lambda: self.deploy_file_honeypot("credentials"),
+            bootstyle="info"
+        ).pack(side=LEFT, padx=5)
+        
+        ttk.Button(
+            file_frame,
+            text="Configuration File",
+            command=lambda: self.deploy_file_honeypot("config"),
+            bootstyle="info"
+        ).pack(side=LEFT, padx=5)
+
+        # Port honeypots
+        port_frame = ttk.Frame(config_frame)
+        port_frame.pack(fill=X, pady=5)
+        
+        ttk.Label(port_frame, text="Deploy Port Honeypot:").pack(side=LEFT, padx=5)
+        
+        ttk.Button(
+            port_frame,
+            text="SSH (22)",
+            command=lambda: self.deploy_port_honeypot("ssh"),
+            bootstyle="info"
+        ).pack(side=LEFT, padx=5)
+        
+        ttk.Button(
+            port_frame,
+            text="HTTP (80)",
+            command=lambda: self.deploy_port_honeypot("http"),
+            bootstyle="info"
+        ).pack(side=LEFT, padx=5)
+        
+        ttk.Button(
+            port_frame,
+            text="Custom Port",
+            command=self.deploy_custom_port_honeypot,
+            bootstyle="warning"
+        ).pack(side=LEFT, padx=5)
+
+        # Honeypots status frame
+        status_frame = ttk.LabelFrame(deception_frame, text="Active Honeypots", padding=10)
+        status_frame.pack(fill=X, padx=10, pady=5)
+
+        # Create a treeview for honeypots
+        columns = ("type", "location", "created", "alerts")
+        self.honeypots_tree = ttk.Treeview(
+            status_frame,
+            columns=columns,
+            show="headings",
+            bootstyle="info",
+            height=5
+        )
+
+        self.honeypots_tree.heading("type", text="Type")
+        self.honeypots_tree.heading("location", text="Location")
+        self.honeypots_tree.heading("created", text="Created")
+        self.honeypots_tree.heading("alerts", text="Alerts")
+
+        self.honeypots_tree.column("type", width=100)
+        self.honeypots_tree.column("location", width=250)
+        self.honeypots_tree.column("created", width=100)
+        self.honeypots_tree.column("alerts", width=70)
+
+        # Add scrollbar for honeypots tree
+        honeypots_scrollbar = ttk.Scrollbar(status_frame, orient=VERTICAL, command=self.honeypots_tree.yview)
+        self.honeypots_tree.configure(yscrollcommand=honeypots_scrollbar.set)
+
+        self.honeypots_tree.pack(side=LEFT, fill=X, expand=True)
+        honeypots_scrollbar.pack(side=RIGHT, fill=Y)
+
+        # Deception alerts frame
+        alerts_frame = ttk.LabelFrame(deception_frame, text="Honeypot Alerts", padding=10)
+        alerts_frame.pack(fill=BOTH, expand=True, padx=10, pady=5)
+
+        # Create text widget for alerts with scrollbar
+        self.deception_alerts_text = ttk.Text(alerts_frame, wrap=WORD, height=15)
+        alerts_scrollbar = ttk.Scrollbar(alerts_frame, orient=VERTICAL, command=self.deception_alerts_text.yview)
+        self.deception_alerts_text.configure(yscrollcommand=alerts_scrollbar.set)
+
+        self.deception_alerts_text.pack(side=LEFT, fill=BOTH, expand=True)
+        alerts_scrollbar.pack(side=RIGHT, fill=Y)
+
+        # Initialize default honeypots in a separate thread
+        threading.Thread(target=self.initialize_default_honeypots, daemon=True).start()
+
+    def start_ai_hunter(self):
+        """Start the AI hunting cycle"""
+        if not self.ai_hunter_running:
+            self.ai_hunter_running = True
+            self.hunter_status_label.config(text="AI Hunter is ACTIVE - Searching for threats...", foreground="green")
+            self.add_action_log("AI Hunter started", "INFO")
+            
+            # Start kernel monitoring
+            self.kernel_monitor.start()
+
+    def stop_ai_hunter(self):
+        """Stop the AI hunting cycle"""
+        if self.ai_hunter_running:
+            self.ai_hunter_running = False
+            self.hunter_status_label.config(text="AI Hunter is STOPPED", foreground="red")
+            self.add_action_log("AI Hunter stopped", "INFO")
+            
+            # Stop kernel monitoring
+            self.kernel_monitor.stop()
+
+    def generate_single_hypothesis(self):
+        """Generate a single threat hunting hypothesis"""
+        self.add_action_log("Generating AI threat hunting hypothesis...", "INFO")
+        
+        def hypothesis_thread():
+            try:
+                # Get system summary
+                system_summary = self.kernel_monitor.get_status_summary()
+                
+                # Generate hypothesis
+                hypothesis = self.llm_agent.generate_hunting_hypothesis(system_summary)
+                
+                if hypothesis:
+                    self.root.after(0, lambda: self.hunter_hypothesis_label.config(text=f"Hypothesis: {hypothesis}"))
+                    
+                    # Execute the hypothesis
+                    results = self.system_query_engine.execute_query(hypothesis)
+                    
+                    # Display results
+                    results_text = "Investigation Results:\n"
+                    results_text += f"Query: {hypothesis}\n"
+                    results_text += f"Results: {json.dumps(results, indent=2)}\n\n"
+                    
+                    self.root.after(0, lambda: self.hunter_results_text.insert("1.0", results_text))
+                    self.root.after(0, lambda: self.add_action_log("AI hypothesis investigation completed", "INFO"))
+                else:
+                    self.root.after(0, lambda: self.add_action_log("Failed to generate AI hypothesis", "WARNING"))
+                    
+            except Exception as error:
+                self.root.after(0, lambda error=error: self.add_action_log(f"Error in hypothesis generation: {error}", "ERROR"))
+        
+        threading.Thread(target=hypothesis_thread, daemon=True).start()
+
+    def schedule_ai_hunter_cycle(self):
+        """Schedule the next AI hunter cycle"""
+        if self.ai_hunter_running:
+            self.generate_single_hypothesis()
+        
+        # Schedule next cycle in 30 seconds
+        self.root.after(30000, self.schedule_ai_hunter_cycle)
+
+    def deploy_file_honeypot(self, file_type: str):
+        """Deploy a file honeypot of the specified type"""
+        try:
+            file_path = self.deception_manager.deploy_honeypot_file(file_type=file_type)
+            self.add_action_log(f"Deployed {file_type} honeypot: {file_path}", "INFO")
+            self.update_honeypots_tree()
+        except Exception as e:
+            self.add_action_log(f"Error deploying {file_type} honeypot: {e}", "ERROR")
+
+    def deploy_port_honeypot(self, service_type: str):
+        """Deploy a network port honeypot"""
+        try:
+            port = self.deception_manager.deploy_honeypot_port(service_type=service_type)
+            self.add_action_log(f"Deployed {service_type} honeypot on port {port}", "INFO")
+            self.update_honeypots_tree()
+        except Exception as e:
+            self.add_action_log(f"Error deploying {service_type} honeypot: {e}", "ERROR")
+
+    def deploy_custom_port_honeypot(self):
+        """Deploy a honeypot on a custom port"""
+        # Create a simple dialog to get port number
+        port_dialog = tk.Toplevel(self.root)
+        port_dialog.title("Deploy Custom Port Honeypot")
+        port_dialog.geometry("300x150")
+        
+        ttk.Label(port_dialog, text="Enter port number:").pack(pady=10)
+        port_entry = ttk.Entry(port_dialog)
+        port_entry.pack(pady=5)
+        port_entry.insert(0, "31337")
+        
+        def deploy_custom():
+            try:
+                port_num = int(port_entry.get())
+                port = self.deception_manager.deploy_honeypot_port(port=port_num, service_type="custom")
+                self.add_action_log(f"Deployed custom honeypot on port {port}", "INFO")
+                self.update_honeypots_tree()
+                port_dialog.destroy()
+            except ValueError:
+                self.add_action_log("Invalid port number", "ERROR")
+            except Exception as e:
+                self.add_action_log(f"Error deploying custom honeypot: {e}", "ERROR")
+        
+        ttk.Button(port_dialog, text="Deploy", command=deploy_custom).pack(pady=10)
+
+    def update_honeypots_tree(self):
+        """Update the honeypots status tree"""
+        # Clear current items
+        for item in self.honeypots_tree.get_children():
+            self.honeypots_tree.delete(item)
+        
+        # Get honeypot status
+        status = self.deception_manager.get_honeypot_status()
+        
+        for honeypot in status.get('honeypots', []):
+            honeypot_type = honeypot.get('type', 'unknown')
+            location = honeypot.get('id', 'unknown')
+            created = honeypot.get('created_time', 'unknown')
+            if created != 'unknown' and 'T' in created:
+                created = created.split('T')[1][:8]  # Extract time only
+            alerts = honeypot.get('access_count', 0)
+            
+            self.honeypots_tree.insert("", "end", values=(honeypot_type, location, created, alerts))
+
+    def initialize_default_honeypots(self):
+        """Initialize some default honeypots for demonstration"""
+        try:
+            # Deploy some default honeypots
+            self.deception_manager.deploy_honeypot_file(file_type="credentials")
+            self.deception_manager.deploy_honeypot_port(service_type="ssh")
+            self.update_honeypots_tree()
+            self.add_action_log("Default honeypots deployed", "INFO")
+        except Exception as e:
+            self.add_action_log(f"Error deploying default honeypots: {e}", "WARNING")

@@ -6,12 +6,9 @@ Interactive AI agent for security analysis and recommendations using Ollama
 
 import requests
 import json
-import time
-import sqlite3
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-import os
-import sys
+import logging
+from datetime import datetime
+from typing import List, Dict, Any
 from security_monitor import SecurityMonitor, SecurityEvent
 
 class LLMSecurityAgent:
@@ -27,7 +24,7 @@ class LLMSecurityAgent:
         try:
             response = requests.get(f"{self.ollama_host}/api/tags", timeout=5)
             return response.status_code == 200
-        except:
+        except Exception:
             return False
     
     def get_available_models(self) -> List[str]:
@@ -38,7 +35,7 @@ class LLMSecurityAgent:
                 models = response.json().get('models', [])
                 return [model.get('name', 'Unknown') for model in models]
             return []
-        except:
+        except Exception:
             return []
     
     def query_ollama(self, prompt: str, context: str = "") -> str:
@@ -182,12 +179,12 @@ Focus on practical, actionable advice for maintaining system security.
             if not target_device:
                 return f"Device '{device_name}' not found in currently connected devices."
             
-            context = f"Device to analyze:\n"
+            context = "Device to analyze:\n"
             context += f"Name: {target_device['name']}\n"
             context += f"Type: {target_device['type']}\n"
             context += f"Details: {json.dumps(target_device['details'], indent=2)}\n"
             
-            prompt = f"""
+            prompt = """
 You are a cybersecurity expert analyzing a specific device on a Mac M1 Max system.
 
 Please analyze this device and provide:
@@ -269,7 +266,7 @@ Provide a concise summary of the security discussion.
             return
         
         models = self.get_available_models()
-        print(f"✅ Connected to Ollama")
+        print("✅ Connected to Ollama")
         print(f"📋 Available models: {', '.join(models[:3])}{'...' if len(models) > 3 else ''}")
         print(f"🤖 Using model: {self.ollama_model}")
         print("=" * 50)
@@ -373,11 +370,236 @@ Keep the response clear, actionable, and focused on security best practices.
             
         except Exception as e:
             return f"Error analyzing security query: {str(e)}"
+    
+    def generate_hunting_hypothesis(self, system_summary: Dict[str, Any]) -> str:
+        """
+        Asks the AI to generate a hypothesis for a potential hidden threat.
+        This implements the proactive hunting capability.
+        """
+        prompt = f"""
+        You are an elite cybersecurity threat hunter. Based on the following system summary, 
+        formulate ONE SINGLE probing question to uncover a potential hidden threat.
+        The question must be answerable by querying system data (e.g., processes, files, connections).
+        
+        System Summary:
+        {json.dumps(system_summary, indent=2)}
 
-def main():
-    """Main function"""
-    agent = LLMSecurityAgent()
-    agent.interactive_mode()
+        Example questions:
+        - "Are there any running processes that are not signed by Apple or a known developer?"
+        - "Is there any network traffic going to a country known for cyber attacks?"
+        - "Are there any recently created executable files in temporary directories?"
+        - "Show me processes with high CPU or memory usage"
+        - "Check for suspicious network connections"
 
-if __name__ == "__main__":
-    main() 
+        Formulate your question as a JSON object: {{"hypothesis_query": "Your question here"}}
+        """
+        try:
+            # Assuming analyze_threat returns a dict from the JSON response
+            response = self.query_ollama(prompt)
+            
+            # Try to extract JSON from the response
+            import re
+            json_match = re.search(r'\{.*"hypothesis_query".*\}', response)
+            if json_match:
+                result = json.loads(json_match.group())
+                return result.get("hypothesis_query")
+            else:
+                # Fallback: extract the question directly
+                lines = response.split('\n')
+                for line in lines:
+                    if '?' in line and any(keyword in line.lower() for keyword in ['process', 'network', 'file', 'connection']):
+                        return line.strip()
+            
+            return "Are there any suspicious processes running on the system?"
+            
+        except Exception as e:
+            logging.error(f"Could not generate AI hypothesis: {e}")
+            return None
+
+    def analyze_threat(self, prompt: str) -> Dict[str, Any]:
+        """
+        Analyze a threat using the LLM and return structured data.
+        Enhanced to return JSON-structured responses for better integration.
+        """
+        try:
+            response = self.query_ollama(prompt)
+            
+            # Try to extract structured data from response
+            result = {
+                'analysis': response,
+                'confidence': 75,  # Default confidence
+                'threat_level': 'medium',
+                'recommendations': []
+            }
+            
+            # Simple analysis of response content for threat level
+            response_lower = response.lower()
+            if any(word in response_lower for word in ['critical', 'severe', 'high risk', 'malware', 'attack']):
+                result['threat_level'] = 'high'
+                result['confidence'] = 85
+            elif any(word in response_lower for word in ['suspicious', 'concern', 'monitor', 'investigate']):
+                result['threat_level'] = 'medium'
+                result['confidence'] = 70
+            elif any(word in response_lower for word in ['normal', 'safe', 'no threat', 'benign']):
+                result['threat_level'] = 'low'
+                result['confidence'] = 80
+                
+            # Extract recommendations
+            lines = response.split('\n')
+            recommendations = []
+            in_recommendations = False
+            
+            for line in lines:
+                line = line.strip()
+                if 'recommend' in line.lower() and ':' in line:
+                    in_recommendations = True
+                    continue
+                if in_recommendations and line and (line.startswith('-') or line.startswith('*') or line.startswith('1.')):
+                    recommendations.append(line.lstrip('-*1234567890. '))
+                elif in_recommendations and not line:
+                    break
+            
+            result['recommendations'] = recommendations
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error in threat analysis: {e}")
+            return {
+                'analysis': f"Error analyzing threat: {str(e)}",
+                'confidence': 0,
+                'threat_level': 'unknown',
+                'recommendations': []
+            }
+
+    def analyze_kernel_event(self, event_data: Dict[str, Any]):
+        """
+        Analyze a kernel event using AI to determine threat level and provide insights.
+        This integrates with the KernelMonitor for real-time analysis.
+        """
+        try:
+            event_context = f"""
+            Kernel Event Analysis:
+            Event Type: {event_data.get('event_type', 'unknown')}
+            Timestamp: {event_data.get('timestamp', 'unknown')}
+            Process: {event_data.get('process', {})}
+            Details: {json.dumps(event_data, indent=2)}
+            """
+            
+            prompt = f"""
+            You are a cybersecurity expert analyzing a kernel-level system event.
+            
+            {event_context}
+            
+            Please analyze this event and provide:
+            1. Threat assessment (low/medium/high/critical)
+            2. Potential security implications
+            3. Whether this requires immediate attention
+            4. Recommended actions
+            
+            Respond in a structured format focusing on security relevance.
+            """
+            
+            analysis = self.analyze_threat(prompt)
+            
+            # Store the analysis for correlation
+            self.add_to_conversation("system", f"Kernel event: {event_data.get('event_type', 'unknown')}")
+            self.add_to_conversation("assistant", analysis['analysis'])
+            
+            return analysis
+            
+        except Exception as e:
+            logging.error(f"Error analyzing kernel event: {e}")
+            return {
+                'analysis': f"Error analyzing kernel event: {str(e)}",
+                'threat_level': 'unknown',
+                'confidence': 0
+            }
+
+    def continuous_threat_hunting(self, interval_minutes: int = 30):
+        """
+        Continuously generate and execute threat hunting hypotheses.
+        This implements the autonomous AI agent hunting loop.
+        """
+        import time
+        from core.system_query_engine import SystemQueryEngine
+        
+        query_engine = SystemQueryEngine()
+        
+        while True:
+            try:
+                # Get current system summary
+                system_summary = self._get_comprehensive_system_summary()
+                
+                # Generate hunting hypothesis
+                hypothesis = self.generate_hunting_hypothesis(system_summary)
+                
+                if hypothesis:
+                    logging.info(f"AI Hunting Hypothesis: {hypothesis}")
+                    
+                    # Execute the query
+                    results = query_engine.execute_query(hypothesis)
+                    
+                    # Analyze results with AI
+                    if results.get('status') == 'success':
+                        analysis_prompt = f"""
+                        As a cybersecurity expert, analyze these query results:
+                        
+                        Query: {hypothesis}
+                        Results: {json.dumps(results, indent=2)}
+                        
+                        Determine:
+                        1. Are there any security concerns in these results?
+                        2. Threat level assessment
+                        3. Immediate actions needed
+                        4. Follow-up investigations
+                        """
+                        
+                        analysis = self.analyze_threat(analysis_prompt)
+                        
+                        # Log significant findings
+                        if analysis['threat_level'] in ['high', 'critical']:
+                            logging.warning(f"AI Hunter found {analysis['threat_level']} threat: {analysis['analysis'][:100]}...")
+                        
+                        # Store results for future correlation
+                        self.add_to_conversation("hunter", f"Query: {hypothesis}")
+                        self.add_to_conversation("hunter_result", str(results))
+                        self.add_to_conversation("hunter_analysis", analysis['analysis'])
+                
+                # Sleep until next hunting cycle
+                time.sleep(interval_minutes * 60)
+                
+            except Exception as e:
+                logging.error(f"Error in continuous threat hunting: {e}")
+                time.sleep(300)  # Wait 5 minutes before retrying
+
+    def _get_comprehensive_system_summary(self) -> Dict[str, Any]:
+        """Get a comprehensive system summary for AI analysis"""
+        try:
+            summary = {
+                'timestamp': datetime.now().isoformat(),
+                'security_events_24h': len(self.security_monitor.get_recent_events(24)),
+                'connected_devices': len(self.security_monitor.extract_devices(self.security_monitor.get_system_info())),
+                'system_load': 'unknown',
+                'network_connections': 0,
+                'running_processes': 0
+            }
+            
+            # Enhance with real-time data
+            try:
+                import psutil
+                summary['system_load'] = psutil.getloadavg()[0] if hasattr(psutil, 'getloadavg') else 'unknown'
+                summary['network_connections'] = len(psutil.net_connections())
+                summary['running_processes'] = len(psutil.pids())
+                summary['cpu_percent'] = psutil.cpu_percent(interval=1)
+                summary['memory_percent'] = psutil.virtual_memory().percent
+            except Exception:
+                pass
+            
+            return summary
+            
+        except Exception as e:
+            logging.error(f"Error getting system summary: {e}")
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'error': str(e)
+            }
