@@ -13,13 +13,18 @@ from datetime import datetime
 from enum import Enum
 from colorama import Fore, Style
 
-class ThreatLevel(Enum):
-    """Рівні загроз"""
-    LOW = 1
-    MEDIUM = 2
-    HIGH = 3
-    CRITICAL = 4
-    EMERGENCY = 5
+# Імпорт ThreatLevel з основного модуля
+try:
+    from nimda_integrated import ThreatLevel
+except ImportError:
+    # Fallback якщо файл запускається окремо
+    class ThreatLevel(Enum):
+        """Рівні загроз"""
+        LOW = 1
+        MEDIUM = 2
+        HIGH = 3
+        CRITICAL = 4
+        EMERGENCY = 5
 
 class AlertType(Enum):
     """Типи сповіщень"""

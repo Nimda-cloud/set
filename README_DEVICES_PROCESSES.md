@@ -159,6 +159,6 @@ python3 nimda_tkinter.py
 
 ---
 
-## 📞 Підтримка
+## 📞 Support
 
-Для запитань та пропозицій щодо покращення функціональності пристроїв та процесів, звертайтеся до документації проекту або створюйте issues у репозиторії. 
+For questions and suggestions regarding improving device and process functionality, please refer to the project documentation or create issues in the repository. 

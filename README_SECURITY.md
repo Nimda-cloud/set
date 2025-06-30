@@ -327,22 +327,42 @@ sqlite3 security_events.db "SELECT * FROM security_events ORDER BY timestamp DES
 ### Корисні команди
 
 ```bash
-# Статус системи
+2. **Monitoring Logs** - check security events
+3. **Setting Notifications** - configure critical notifications
+4. **Backup** - store event database
+
+### Logging
+
+```bash
+# View logs
+tail -f security_monitor.log
+tail -f nimda.log
+
+# Analyze events
+sqlite3 security_events.db "SELECT * FROM security_events ORDER BY timestamp DESC LIMIT 10;"
+```
+
+## 📞 Support
+
+### Useful Commands
+
+```bash
+# System status
 python3 -c "from security_monitor import SecurityMonitor; print(SecurityMonitor().get_status_summary())"
 
-# Перевірка пристроїв
+# Check devices
 system_profiler SPUSBDataType -json | jq '.'
 
-# Тест мережі
+# Network test
 networksetup -listallhardwareports
 ```
 
-### Логи та діагностика
+### Logs and Diagnosis
 
-- `security_events.db` - база даних подій
-- `security_monitor.log` - логи монітора
-- `nimda.log` - логи основної системи
+- `security_events.db` - event database
+- `security_monitor.log` - monitor logs
+- `nimda.log` - main system logs
 
 ---
 
-**NIMDA Security System** - розумна безпека для Mac M1 Max з інтеграцією Ollama 🤖🔒 
+**NIMDA Security System** - smart security for Mac M1 Max with Ollama integration 🤖🔒 

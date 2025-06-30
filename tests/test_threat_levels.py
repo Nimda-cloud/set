@@ -9,8 +9,8 @@ import os
 import json
 from datetime import datetime
 
-# Add current directory to path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nimda_tkinter import ThreatLevel, SecurityAction, SecurityPolicy, ThreatAnalyzer
 

@@ -11,6 +11,20 @@ A comprehensive security monitoring system with Tkinter GUI, featuring real-time
 - **Threat Assessment**: AI-powered threat analysis and recommendations
 - **Security Logging**: Comprehensive event logging and reporting
 
+### 🔊 Advanced Sound Alert System
+- **Multi-level Threat Sounds**: Different sounds for each threat level (LOW to EMERGENCY)
+- **macOS System Integration**: Uses native macOS sounds (Tink, Pop, Sosumi, Basso, Funk)
+- **Intelligent Alert Intervals**: Adaptive timing based on threat severity
+- **Emergency Siren Mode**: Continuous alerts for critical situations
+- **Sound Pattern Recognition**: Unique audio patterns for different threat types
+
+### 📊 Threat Level Analysis
+- **5-Level Threat Classification**: LOW, MEDIUM, HIGH, CRITICAL, EMERGENCY
+- **Automated Response System**: Automatic actions based on threat level
+- **Real-time Threat Scoring**: Dynamic threat assessment with context analysis
+- **Historical Threat Tracking**: Complete threat history and trend analysis
+- **Smart Context Analysis**: IP analysis, malware signatures, privilege escalation detection
+
 ### AI-Powered Analysis
 - **Multi-language AI Support**: Ukrainian and English responses
 - **Deep Analysis**: Detailed analysis of ports, addresses, and anomalies

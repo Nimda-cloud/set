@@ -21,13 +21,18 @@ from colorama import Fore, Style, init
 # Ініціалізація colorama
 init()
 
-class ThreatLevel(Enum):
-    """Threat levels with corresponding sound types"""
-    LOW = ("low", "Ping")
-    MEDIUM = ("medium", "Sosumi") 
-    HIGH = ("high", "Basso")
-    CRITICAL = ("critical", "Frog")
-    EMERGENCY = ("emergency", "Glass")
+# Імпорт ThreatLevel з основного модуля
+try:
+    from nimda_integrated import ThreatLevel
+except ImportError:
+    # Fallback якщо файл запускається окремо
+    class ThreatLevel(Enum):
+        """Threat levels with corresponding sound types"""
+        LOW = ("low", "Ping")
+        MEDIUM = ("medium", "Sosumi") 
+        HIGH = ("high", "Basso")
+        CRITICAL = ("critical", "Frog")
+        EMERGENCY = ("emergency", "Glass")
 
 class SoundAlertSystem:
     """Enhanced sound alert system with different sounds for threat levels"""
