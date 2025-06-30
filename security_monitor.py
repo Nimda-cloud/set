@@ -12,12 +12,13 @@ import threading
 import requests
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, List, Set, Optional, Any
+from typing import Dict, List, Any
 import os
 import re
 import sqlite3
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 import logging
+import psutil
 
 @dataclass
 class SecurityEvent:
@@ -511,6 +512,390 @@ Focus on security implications and provide actionable recommendations.
         except Exception as e:
             self.logger.error(f"Error getting status summary: {e}")
             return {}
+    
+    def get_file_hash(self, filepath):
+        """Розраховує SHA-256 хеш файлу."""
+        sha256_hash = hashlib.sha256()
+        try:
+            with open(filepath, "rb") as f:
+                # Читаємо файл частинами, щоб не завантажувати великі файли в пам'ять
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            return sha256_hash.hexdigest()
+        except FileNotFoundError:
+            return None
+        except Exception as e:
+            self.logger.error(f"Помилка при хешуванні файлу {filepath}: {e}")
+            return None
+
+    def monitor_suspicious_downloads(self):
+        """
+        Моніторить папку Downloads і хешує нові файли.
+        Цю функцію можна викликати періодично.
+        """
+        downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
+        if not os.path.exists(downloads_path):
+            self.logger.warning(f"Downloads папка не знайдена: {downloads_path}")
+            return
+            
+        suspicious_extensions = ['.sh', '.py', '.pl', '.rb', '.jar', '.dmg', '.pkg', '.app']
+        new_files = []
+        
+        try:
+            for filename in os.listdir(downloads_path):
+                filepath = os.path.join(downloads_path, filename)
+                if os.path.isfile(filepath):
+                    # Перевіряємо час створення файлу (нові файли за останню годину)
+                    file_mtime = os.path.getmtime(filepath)
+                    current_time = time.time()
+                    if current_time - file_mtime < 3600:  # 1 година
+                        file_hash = self.get_file_hash(filepath)
+                        if file_hash:
+                            file_info = {
+                                'filename': filename,
+                                'filepath': filepath,
+                                'hash': file_hash,
+                                'size': os.path.getsize(filepath),
+                                'modified_time': datetime.fromtimestamp(file_mtime).isoformat(),
+                                'suspicious': any(filename.lower().endswith(ext) for ext in suspicious_extensions)
+                            }
+                            new_files.append(file_info)
+                            
+                            # Логуємо подію
+                            self.log_security_event(
+                                event_type="new_file_download",
+                                device_name=filename,
+                                device_id=file_hash[:16],
+                                port_type="filesystem",
+                                action="detected",
+                                details=file_info,
+                                risk_level="medium" if file_info['suspicious'] else "low"
+                            )
+                            
+                            self.logger.info(f"Новий файл: {filename}, Хеш: {file_hash}, Підозрілий: {file_info['suspicious']}")
+                            
+        except Exception as e:
+            self.logger.error(f"Помилка моніторингу завантажень: {e}")
+        
+        return new_files
+
+    def get_shell_history(self, limit=20):
+        """Отримує останні команди з історії shell."""
+        history_files = {
+            'bash': os.path.expanduser('~/.bash_history'),
+            'zsh': os.path.expanduser('~/.zsh_history')
+        }
+        history = []
+        
+        for shell, path in history_files.items():
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', errors='ignore') as f:
+                        lines = f.readlines()
+                        # Беремо останні N команд
+                        for line in lines[-limit:]:
+                            cleaned_line = line.strip()
+                            if cleaned_line:
+                                # Для zsh історії, очищуємо timestamp якщо є
+                                if shell == 'zsh' and cleaned_line.startswith(':'):
+                                    # Формат zsh: ": timestamp:duration;command"
+                                    parts = cleaned_line.split(';', 1)
+                                    if len(parts) > 1:
+                                        cleaned_line = parts[1]
+                                
+                                history.append({
+                                    'shell': shell,
+                                    'command': cleaned_line,
+                                    'timestamp': datetime.now().isoformat()  # Approximation
+                                })
+                except Exception as e:
+                    self.logger.error(f"Не вдалося прочитати історію {shell}: {e}")
+        
+        return history[-limit:] if history else []
+
+    def analyze_command_history_for_threats(self):
+        """
+        Аналізує історію команд на предмет підозрілої активності.
+        """
+        history = self.get_shell_history(50)  # Беремо останні 50 команд
+        suspicious_patterns = [
+            r'curl\s+.*\|\s*(bash|sh)',  # Завантаження та виконання скриптів
+            r'wget\s+.*\|\s*(bash|sh)', 
+            r'nc\s+-l',  # Netcat listener
+            r'python.*-c.*exec',  # Виконання Python коду
+            r'chmod\s+\+x.*\.sh',  # Надання прав виконання скриптам
+            r'sudo\s+.*(/tmp|/var/tmp)',  # Виконання команд з тимчасових папок
+            r'rm\s+.*\.(log|history)',  # Видалення логів/історії
+            r'pkill.*-f.*python',  # Завершення Python процесів
+            r'launchctl\s+(load|unload)',  # Управління системними сервісами
+            r'/System/Library/.*plist'  # Маніпуляції з системними plist файлами
+        ]
+        
+        suspicious_commands = []
+        
+        for entry in history:
+            command = entry['command']
+            for pattern in suspicious_patterns:
+                if re.search(pattern, command, re.IGNORECASE):
+                    suspicious_commands.append({
+                        'command': command,
+                        'pattern': pattern,
+                        'shell': entry['shell'],
+                        'timestamp': entry['timestamp'],
+                        'risk_level': self._assess_command_risk(command)
+                    })
+                    
+                    # Логуємо підозрілу команду
+                    self.log_security_event(
+                        event_type="suspicious_command",
+                        device_name=entry['shell'],
+                        device_id=hashlib.md5(command.encode()).hexdigest()[:16],
+                        port_type="shell",
+                        action="executed",
+                        details={'command': command, 'pattern': pattern},
+                        risk_level=self._assess_command_risk(command)
+                    )
+                    break
+        
+        return suspicious_commands
+
+    def _assess_command_risk(self, command):
+        """Оцінює рівень ризику команди"""
+        high_risk_indicators = [
+            'rm -rf /',
+            'dd if=',
+            'wget.*malware',
+            'curl.*malware',
+            'nc -l',
+            'python -c "exec',
+            'sudo rm',
+            '/tmp/.*\.sh'
+        ]
+        
+        medium_risk_indicators = [
+            'chmod +x',
+            'curl.*|.*bash',
+            'wget.*|.*sh',
+            'launchctl',
+            'sudo',
+            'pkill',
+            'killall'
+        ]
+        
+        command_lower = command.lower()
+        
+        for indicator in high_risk_indicators:
+            if re.search(indicator, command_lower):
+                return "high"
+        
+        for indicator in medium_risk_indicators:
+            if re.search(indicator, command_lower):
+                return "medium"
+        
+        return "low"
+
+    def monitor_file_integrity(self, watch_paths=None):
+        """
+        Моніторить цілісність важливих системних файлів.
+        """
+        if watch_paths is None:
+            watch_paths = [
+                '/etc/hosts',
+                '/etc/passwd',
+                '/System/Library/LaunchDaemons',
+                '~/.ssh/authorized_keys',
+                '~/.bash_profile',
+                '~/.zshrc'
+            ]
+        
+        integrity_data = {}
+        
+        for path in watch_paths:
+            expanded_path = os.path.expanduser(path)
+            if os.path.exists(expanded_path):
+                if os.path.isfile(expanded_path):
+                    file_hash = self.get_file_hash(expanded_path)
+                    if file_hash:
+                        integrity_data[expanded_path] = {
+                            'hash': file_hash,
+                            'size': os.path.getsize(expanded_path),
+                            'modified': os.path.getmtime(expanded_path),
+                            'checked_at': datetime.now().isoformat()
+                        }
+                elif os.path.isdir(expanded_path):
+                    # Для директорій рахуємо кількість файлів та загальний розмір
+                    try:
+                        files_count = len([f for f in os.listdir(expanded_path) if os.path.isfile(os.path.join(expanded_path, f))])
+                        integrity_data[expanded_path] = {
+                            'type': 'directory',
+                            'files_count': files_count,
+                            'checked_at': datetime.now().isoformat()
+                        }
+                    except PermissionError:
+                        self.logger.warning(f"Немає доступу до директорії: {expanded_path}")
+        
+        return integrity_data
+
+    def get_enhanced_system_state(self):
+        """
+        Розширена функція отримання стану системи з додатковими даними безпеки.
+        """
+        base_info = self.get_system_info()
+        
+        # Додаємо розширену інформацію
+        enhanced_info = {
+            **base_info,
+            'file_downloads': self.monitor_suspicious_downloads(),
+            'command_history_threats': self.analyze_command_history_for_threats(),
+            'file_integrity': self.monitor_file_integrity(),
+            'active_connections_detailed': self._get_detailed_network_connections(),
+            'running_services': self._get_system_services(),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return enhanced_info
+
+    def _get_detailed_network_connections(self):
+        """Отримує детальну інформацію про мережеві з'єднання"""
+        connections = []
+        try:
+            for conn in psutil.net_connections():
+                if conn.status == 'ESTABLISHED':
+                    conn_info = {
+                        'local_address': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else "N/A",
+                        'remote_address': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "N/A",
+                        'status': conn.status,
+                        'pid': conn.pid,
+                        'family': conn.family.name if hasattr(conn.family, 'name') else str(conn.family),
+                        'type': conn.type.name if hasattr(conn.type, 'name') else str(conn.type)
+                    }
+                    
+                    # Додаємо інформацію про процес
+                    if conn.pid:
+                        try:
+                            proc = psutil.Process(conn.pid)
+                            conn_info['process_name'] = proc.name()
+                            conn_info['process_exe'] = proc.exe()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                    
+                    connections.append(conn_info)
+        except Exception as e:
+            self.logger.error(f"Помилка отримання детальних з'єднань: {e}")
+        
+        return connections
+
+    def _get_system_services(self):
+        """Отримує список активних системних сервісів"""
+        services = []
+        try:
+            # Використовуємо launchctl для отримання списку сервісів
+            result = subprocess.run(['launchctl', 'list'], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')[1:]  # Пропускаємо заголовок
+                for line in lines:
+                    if line.strip():
+                        parts = line.split('\t')
+                        if len(parts) >= 3:
+                            services.append({
+                                'pid': parts[0] if parts[0] != '-' else None,
+                                'status': parts[1],
+                                'label': parts[2]
+                            })
+        except Exception as e:
+            self.logger.error(f"Помилка отримання сервісів: {e}")
+        
+        return services
+
+    def log_security_event(self, event_type: str, device_name: str, device_id: str, 
+                          port_type: str, action: str, details: Dict[str, Any], 
+                          risk_level: str):
+        """
+        Логує події безпеки в базу даних
+        """
+        try:
+            conn = sqlite3.connect('data/security_events.db')
+            cursor = conn.cursor()
+            
+            # Створюємо хеш для унікальності події
+            event_data = f"{event_type}_{device_name}_{device_id}_{action}_{datetime.now().date()}"
+            event_hash = hashlib.md5(event_data.encode()).hexdigest()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO security_events 
+                (timestamp, event_type, device_name, device_id, port_type, action, details, risk_level, hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now().isoformat(),
+                event_type,
+                device_name,
+                device_id,
+                port_type,
+                action,
+                json.dumps(details),
+                risk_level,
+                event_hash
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            # Логуємо також в файл
+            self.logger.info(f"Security event: {event_type} - {device_name} ({risk_level})")
+            
+        except Exception as e:
+            self.logger.error(f"Помилка логування події: {e}")
+
+    def get_security_events(self, limit: int = 100, event_type: str = None, 
+                           risk_level: str = None) -> List[Dict[str, Any]]:
+        """
+        Отримує події безпеки з бази даних
+        """
+        try:
+            conn = sqlite3.connect('data/security_events.db')
+            cursor = conn.cursor()
+            
+            query = "SELECT * FROM security_events"
+            params = []
+            
+            conditions = []
+            if event_type:
+                conditions.append("event_type = ?")
+                params.append(event_type)
+            if risk_level:
+                conditions.append("risk_level = ?")
+                params.append(risk_level)
+            
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            events = []
+            for row in rows:
+                events.append({
+                    'id': row[0],
+                    'timestamp': row[1],
+                    'event_type': row[2],
+                    'device_name': row[3],
+                    'device_id': row[4],
+                    'port_type': row[5],
+                    'action': row[6],
+                    'details': json.loads(row[7]) if row[7] else {},
+                    'risk_level': row[8],
+                    'hash': row[9]
+                })
+            
+            conn.close()
+            return events
+            
+        except Exception as e:
+            self.logger.error(f"Помилка отримання подій: {e}")
+            return []
 
 def main():
     """Test the security monitor"""

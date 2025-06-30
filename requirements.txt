@@ -4,3 +4,10 @@ requests>=2.25.1
 schedule>=1.1.0
 python-tk>=8.6.0
 keyring>=23.0.0
+sqlite3
+hashlib
+re
+json
+threading
+subprocess
+datetime
