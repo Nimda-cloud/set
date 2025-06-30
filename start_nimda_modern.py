@@ -40,11 +40,11 @@ def main():
         # Встановлюємо іконку (якщо є)
         try:
             root.iconphoto(True, tk.PhotoImage(file="assets/nimda_icon.png"))
-        except:
+        except (tk.TclError, FileNotFoundError):
             pass  # Іконка не обов'язкова
         
         # Створюємо додаток
-        app = NimdaModernGUI(root)
+        _ = NimdaModernGUI(root)  # Посилання зберігати не потрібно
         
         print("✅ GUI successfully initialized")
         print("🔍 All monitoring systems starting...")
